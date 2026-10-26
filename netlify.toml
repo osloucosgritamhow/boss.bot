@@ -1,0 +1,5 @@
+[build]
+  functions = "netlify/functions"
+
+[functions."boss_updater"]
+  schedule = "*/20 * * * *"
