@@ -8,12 +8,11 @@ socket.setdefaulttimeout(4)
 sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
-# Usando o formato correto de menção de cargo do Discord (substitua pelo ID correto se necessário, ou deixe o texto do cargo)
-ROLE_TAG = "<@&1563375363760070729>" # Caso o cargo seja @Bosses, ajustado para menção real
+ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando varredura para o Discord...")
-    raids_data = []
+    print("Iniciando captura correta dos bosses...")
+    raids_list = []
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
@@ -32,23 +31,30 @@ def main():
                 continue
             
             data = json.loads(msg)
+            if isinstance(data, dict):
+                # Procura diretamente onde o site armazena os raids do chronos ou na lista geral
+                root = data.get("data", data)
+                if "chronos" in root and isinstance(root["chronos"], dict):
+                    raids_list = root["chronos"].get("raids", [])
+                elif "raids" in root and isinstance(root["raids"], list):
+                    raids_list = root["raids"]
+                else:
+                    # Varre recursivamente se necessário
+                    def extract_all(obj):
+                        if isinstance(obj, dict):
+                            if "idx" in obj and "name" in obj:
+                                raids_list.append(obj)
+                            for v in obj.values():
+                                extract_all(v)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                extract_all(item)
+                    extract_all(data)
             
-            def find_raids(obj):
-                if isinstance(obj, dict):
-                    if "raids" in obj and isinstance(obj["raids"], list):
-                        raids_data.extend(obj["raids"])
-                    for k, v in obj.items():
-                        find_raids(v)
-                elif isinstance(obj, list):
-                    for item in obj:
-                        find_raids(item)
-
-            find_raids(data)
-            if raids_data:
+            if raids_list:
                 break
-                
     except Exception as e:
-        print(f"Aviso na leitura: {e}")
+        print(f"Erro na conexão: {e}")
     finally:
         if ws:
             try:
@@ -56,28 +62,23 @@ def main():
             except:
                 pass
 
-    if not raids_data:
-        print("Nenhum dado capturado.")
+    if not raids_list:
+        print("Nenhum boss encontrado.")
         return
 
-    # Organiza e filtra os dados do Chronos
-    chronos = [r for r in raids_data if str(r.get("server", "15")) == "15"]
-    if not chronos:
-        chronos = raids_data
-
-    # Ordena pelo countdown
-    chronos.sort(key=lambda x: x.get("_countdown", x.get("countdown", "")))
+    # Filtra rigorosamente pelo servidor Chronos (server 15) e remove itens inválidos
+    chronos = [r for r in raids_list if str(r.get("server", "15")) == "15" and r.get("name")]
+    
+    # Ordena pelo countdown (priorizando os mais próximos)
+    chronos.sort(key=lambda x: x.get("_countdown", x.get("countdown", "ZZZ")))
 
     fields = []
     for r in chronos[:6]:
-        name = r.get("name", r.get("title", "Unknown Boss"))
+        name = r.get("name", "Unknown Boss")
         cd = r.get("_countdown", r.get("countdown", "N/A"))
         tm = r.get("_time", r.get("time", "N/A"))
         
-        # Limpa formatação de timestamp numérico bruto caso venha corrompido
-        if str(tm).isdigit() and len(str(tm)) > 10:
-            tm = "Horário sob consulta"
-
+        # Formatação do ícone baseada no status do countdown
         icon = "🔴" if "T+" in str(cd) else "🟢"
         
         fields.append({
@@ -88,20 +89,19 @@ def main():
 
     embed = {
         "title": "⏰ LEMBRETE DE BOSSES (Chronos)",
-        "description": "Atualização automática de rotina (a cada 20 min).",
+        "description": "Atualização automática de rotina.",
         "color": 10038562,
         "fields": fields
-        # Rodapé da fonte ocultado conforme solicitado
     }
 
     payload = {
-        "content": f"@Bosses **ATENÇÃO!** Próximos Raid Bosses do Chronos:",
+        "content": f"{ROLE_TAG} **ATENÇÃO!** Próximos Raid Bosses do Chronos:",
         "embeds": [embed],
-        "allowed_mentions": {"parse": ["users", "roles"]}
+        "allowed_mentions": {"parse": ["roles"]}
     }
 
     res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
-    print(f"Status do envio para o Discord: {res.status_code}")
+    print(f"Status do envio: {res.status_code}")
 
 if __name__ == "__main__":
     main()
