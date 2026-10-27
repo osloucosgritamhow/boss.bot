@@ -2,7 +2,6 @@ import json
 import socket
 import sys
 import os
-import time
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 import requests
@@ -119,7 +118,7 @@ def get_fixed_bosses_list():
             
     return fixed_list
 
-def run_bot_cycle():
+def main():
     print(f"[{datetime.now()}] Iniciando varredura híbrida com layout tático...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
@@ -275,12 +274,4 @@ def run_bot_cycle():
     requests.post(WEBHOOK_URL, json=payload_dashboard, timeout=5)
 
 if __name__ == "__main__":
-    print("Bot AOG RaidAPP iniciado em modo contínuo (loop de 20 minutos)...")
-    while True:
-        try:
-            run_bot_cycle()
-        except Exception as e:
-            print(f"Erro inesperado no ciclo do bot: {e}")
-        
-        print("Aguardando 20 minutos para o próximo ciclo...")
-        time.sleep(1200)
+    main()
