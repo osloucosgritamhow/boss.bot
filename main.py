@@ -8,13 +8,35 @@ ROLE_TAG = "@Bosses"
 
 def main():
     raids_data = {}
+    
+    # Tentativa de conexão ajustada com headers simulando um navegador completo
+    urls_to_try = [
+        "wss://l2stuff.xyz/ws",
+        "wss://l2stuff.xyz/socket.io/?EIO=4&transport=websocket"
+    ]
+    
+    ws = None
+    for ws_url in urls_to_try:
+        try:
+            print(f"Tentando conectar em: {ws_url}")
+            ws = create_connection(
+                ws_url,
+                header={
+                    "Origin": "https://l2stuff.xyz",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+                },
+                timeout=10
+            )
+            break
+        except Exception as e:
+            print(f"Falha na URL {ws_url}: {e}")
+
+    if not ws:
+        print("Erro crítico: Não foi possível estabelecer conexão WebSocket em nenhuma das rotas.")
+        return
 
     try:
-        ws = create_connection(
-            "wss://l2stuff.xyz/ws",
-            header={"Origin": "https://l2stuff.xyz"},
-            timeout=10
-        )
         for _ in range(3):
             msg = ws.recv()
             data = json.loads(msg)
@@ -24,11 +46,11 @@ def main():
                 break
         ws.close()
     except Exception as e:
-        print("Erro ao conectar no WebSocket:", e)
+        print("Erro ao receber dados do WebSocket:", e)
         return
 
     if not raids_data:
-        print("Não foi possível coletar os dados do WebSocket.")
+        print("Não foi possível coletar os dados do WebSocket (dados vazios).")
         return
 
     chronos = [r for r in raids_data.values() if str(r.get("server")) == "15"]
@@ -41,7 +63,7 @@ def main():
         tm = r.get("_time", "N/A")
         name = r.get("name", "Unknown Boss")
         icon = "🔴" if "T+" in str(cd) else "🟢"
-
+        
         fields.append({
             "name": f"{icon} {name}",
             "value": f"⏳ Respawn: `{cd}` | Previsto: `{tm}`",
