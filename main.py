@@ -4,7 +4,6 @@ import sys
 import requests
 from websocket import create_connection
 
-# Timeout global rígido: nenhum socket pode travar por mais de 3 segundos
 socket.setdefaulttimeout(3)
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -12,7 +11,7 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando execução com timeout global...")
+    print("Iniciando execução com requisição de dados...")
     raids_data = {}
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
@@ -27,14 +26,24 @@ def main():
         ws = create_connection(ws_url, header=ws_headers, timeout=3)
         ws.settimeout(3)
         
+        # Envia a solicitação que o site faz para o WebSocket liberar os dados dos raids
+        try:
+            ws.send(json.dumps({"action": "getRaids"}))
+        except:
+            pass
+
         print("Lendo dados do servidor...")
-        msg = ws.recv()
-        if msg:
-            data = json.loads(msg)
-            if isinstance(data, dict):
-                raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-                for r in raids_list:
-                    raids_data[r["idx"]] = r
+        # Lê algumas mensagens para pegar o pacote correto
+        for _ in range(3):
+            msg = ws.recv()
+            if msg:
+                data = json.loads(msg)
+                if isinstance(data, dict):
+                    raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
+                    if raids_list:
+                        for r in raids_list:
+                            raids_data[r["idx"]] = r
+                        break
     except Exception as e:
         print(f"Aviso ou timeout na conexão: {e}")
     finally:
@@ -45,7 +54,7 @@ def main():
                 pass
 
     if not raids_data:
-        print("Nenhum dado capturado nesta execução. Encerrando com segurança.")
+        print("Nenhum dado capturado nesta execução.")
         return
 
     print(f"Processando {len(raids_data)} raids...")
