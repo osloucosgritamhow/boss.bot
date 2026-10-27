@@ -3,7 +3,7 @@ import socket
 import sys
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import requests
 from websocket import create_connection
@@ -14,6 +14,16 @@ sys.stdout.reconfigure(line_buffering=True)
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
+
+# ==========================================
+# CRONOGRAMA FIXO E BLINDADO DE BOSSES
+# ==========================================
+# Defina aqui os horários diários (Hora, Minuto) para os bosses de horário fixo.
+FIXED_BOSSES = [
+    {"name": "Stakato Queen", "times": [time(10, 0), time(13, 0), time(17, 0)]},
+    {"name": "Mega Chaos Golem", "times": [time(10, 0), time(13, 0), time(17, 0)]},
+    {"name": "Chaos Golem", "times": [time(11, 0), time(15, 0)]},
+]
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -88,8 +98,44 @@ def parse_time_and_countdown(ts, raw_cd=None):
 
     return "O boss nasce em N/A", "Horário sob consulta", 999999, False, 0
 
+def get_fixed_bosses_list():
+    """Gera dinamicamente os próximos horários dos bosses fixos com base no horário atual de Brasília"""
+    tz = ZoneInfo("America/Sao_Paulo")
+    now = datetime.now(tz)
+    fixed_list = []
+
+    for item in FIXED_BOSSES:
+        name = item["name"]
+        for t in item["times"]:
+            # Cria o datetime para hoje com o horário fixo
+            target_dt = datetime.combine(now.date(), t, tzinfo=tz)
+            
+            # Se o horário de hoje já passou, calcula para o mesmo horário de amanhã
+            if target_dt < now:
+                target_dt += timedelta(days=1)
+            
+            diff_seconds = int((target_dt - now).total_seconds())
+            hours = diff_seconds // 3600
+            minutes = (diff_seconds % 3600) // 60
+            seconds = diff_seconds % 60
+            
+            cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            cd_text = f"O boss nasce em {cd_time}"
+            total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
+            
+            fixed_list.append({
+                "name": name,
+                "cd": cd_text,
+                "tm": target_dt.strftime("%d/%m/%Y %H:%M"),
+                "mins": total_mins,
+                "passed": False,
+                "timestamp": target_dt.timestamp()
+            })
+            
+    return fixed_list
+
 def main():
-    print("Conectando ao WebSocket para varredura completa...")
+    print("Iniciando varredura híbrida (WebSocket + Cronograma Fixo)...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -109,7 +155,7 @@ def main():
                     raw_data = parsed
                     break
     except Exception as e:
-        print(f"Erro na conexão WebSocket: {e}")
+        print(f"Aviso na conexão WebSocket (seguindo com bosses fixos): {e}")
     finally:
         if ws:
             try:
@@ -117,31 +163,34 @@ def main():
             except:
                 pass
 
-    if not raw_data:
-        print("Nenhum dado capturado.")
-        return
-
     raids_list = []
-    def extract_raids(obj):
-        if isinstance(obj, dict):
-            if ("name" in obj or "title" in obj) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
-                raids_list.append(obj)
-            for v in obj.values():
-                extract_raids(v)
-        elif isinstance(obj, list):
-            for item in obj:
-                extract_raids(item)
+    if raw_data:
+        def extract_raids(obj):
+            if isinstance(obj, dict):
+                if ("name" in obj or "title" in obj) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
+                    raids_list.append(obj)
+                for v in obj.values():
+                    extract_raids(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    extract_raids(item)
 
-    extract_raids(raw_data)
+        extract_raids(raw_data)
 
     chronos_bosses = [r for r in raids_list if str(r.get("server", "15")) == "15"]
-    if not chronos_bosses:
+    if not chronos_bosses and raids_list:
         chronos_bosses = raids_list
 
     unique_bosses = {}
+    
+    # 1. Processa os bosses dinâmicos do site (Field Raids, etc.)
     for r in chronos_bosses:
         name = r.get("name", r.get("title"))
         if not name:
+            continue
+        
+        # Ignora nomes que são puramente os fixos para evitar duplicidade com a tabela estática
+        if any(f["name"].lower() in name.lower() for f in FIXED_BOSSES):
             continue
         
         raw_cd = r.get("_countdown", r.get("countdown"))
@@ -171,6 +220,12 @@ def main():
                 }
 
     bosses_clean = list(unique_bosses.values())
+
+    # 2. Adiciona os bosses de horário fixo blindados diretamente no código
+    fixed_clean = get_fixed_bosses_list()
+    bosses_clean.extend(fixed_clean)
+
+    # Ordena do menor tempo para o maior
     bosses_clean.sort(key=lambda x: abs(x["mins"]) if x["mins"] != 999999 else 999999)
 
     if not bosses_clean:
@@ -180,6 +235,7 @@ def main():
     state = load_state()
     state_updated = False
 
+    # Processa os 6 bosses mais próximos
     for r in bosses_clean[:6]:
         name = r["name"]
         mins = r["mins"]
@@ -187,6 +243,7 @@ def main():
         tm_formatted = r["tm"]
         passed = r["passed"]
 
+        # Disparo do alerta urgente de 5 minutos
         if 0 <= mins <= 5 and not passed:
             alert_key = f"5min_{tm_formatted}"
             if state.get(name) == alert_key:
@@ -203,6 +260,7 @@ def main():
                 state_updated = True
                 continue
 
+        # Notificação individual de rotina
         icon = "🔴" if passed else "🟢"
         embed = {
             "title": f"⚔️ AOG | RAID ALERT: {name.upper()}",
