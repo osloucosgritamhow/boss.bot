@@ -1,18 +1,30 @@
 import json
 import socket
 import sys
+from datetime import datetime
 import requests
 from websocket import create_connection
 
-# Garante timeout absoluto em qualquer operação de socket/rede
 socket.setdefaulttimeout(4)
 sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
 ROLE_TAG = "@Bosses"
 
+def format_time(ts):
+    try:
+        if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
+            val = int(ts)
+            if val > 10000000000:  # Se estiver em milissegundos
+                val = val / 1000
+            dt = datetime.fromtimestamp(val)
+            return dt.strftime("%d/%m/%Y %H:%M")
+    except:
+        pass
+    return str(ts)
+
 def main():
-    print("Iniciando conexão com WebSocket...")
+    print("Conectando ao WebSocket...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -24,7 +36,6 @@ def main():
     try:
         ws = create_connection(ws_url, header=ws_headers, timeout=4)
         ws.settimeout(4)
-        print("Conectado com sucesso! Aguardando dados...")
         
         for i in range(3):
             msg = ws.recv()
@@ -32,10 +43,9 @@ def main():
                 parsed = json.loads(msg)
                 if isinstance(parsed, dict):
                     raw_data = parsed
-                    print(f"Dados recebidos na mensagem {i+1}")
                     break
     except Exception as e:
-        print(f"Erro ou timeout na conexão WebSocket: {e}")
+        print(f"Erro na conexão: {e}")
     finally:
         if ws:
             try:
@@ -44,7 +54,7 @@ def main():
                 pass
 
     if not raw_data:
-        print("Nenhum dado capturado. Encerrando com segurança.")
+        print("Nenhum dado capturado.")
         return
 
     raids_list = []
@@ -69,13 +79,16 @@ def main():
     fields = []
     for r in chronos_bosses[:6]:
         name = r.get("name", "Unknown Boss")
-        cd = r.get("_countdown", r.get("countdown", "N/A"))
-        tm = r.get("_time", r.get("time", "N/A"))
+        cd = r.get("_countdown", r.get("countdown", r.get("time_left", "N/A")))
+        tm = r.get("_time", r.get("time", r.get("respawn_time", "N/A")))
+        
+        # Converte o timestamp bruto para data legível
+        tm_formatted = format_time(tm)
         
         icon = "🔴" if "T+" in str(cd) else "🟢"
         fields.append({
             "name": f"{icon} {name}",
-            "value": f"⏳ Respawn: `{cd}` | Previsto: `{tm}`",
+            "value": f"⏳ Respawn: `{cd}` | Previsto: `{tm_formatted}`",
             "inline": False
         })
 
