@@ -1,97 +1,76 @@
-import json
-import socket
 import sys
 import requests
-from websocket import create_connection
+from bs4 import BeautifulSoup
 
-socket.setdefaulttimeout(4)
 sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando captura correta dos bosses...")
-    raids_list = []
+    print("Buscando dados diretamente do l2stuff.xyz...")
     
-    ws_url = "wss://ws.raids.l2stuff.xyz/"
-    ws_headers = {
-        "Origin": "https://l2stuff.xyz",
+    headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    ws = None
     try:
-        ws = create_connection(ws_url, header=ws_headers, timeout=4)
-        ws.settimeout(4)
-        
-        for i in range(4):
-            msg = ws.recv()
-            if not msg:
-                continue
-            
-            data = json.loads(msg)
-            if isinstance(data, dict):
-                # Procura diretamente onde o site armazena os raids do chronos ou na lista geral
-                root = data.get("data", data)
-                if "chronos" in root and isinstance(root["chronos"], dict):
-                    raids_list = root["chronos"].get("raids", [])
-                elif "raids" in root and isinstance(root["raids"], list):
-                    raids_list = root["raids"]
-                else:
-                    # Varre recursivamente se necessário
-                    def extract_all(obj):
-                        if isinstance(obj, dict):
-                            if "idx" in obj and "name" in obj:
-                                raids_list.append(obj)
-                            for v in obj.values():
-                                extract_all(v)
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                extract_all(item)
-                    extract_all(data)
-            
-            if raids_list:
-                break
-    except Exception as e:
-        print(f"Erro na conexão: {e}")
-    finally:
-        if ws:
-            try:
-                ws.close()
-            except:
-                pass
+        # Acessa a página principal do l2stuff
+        response = requests.get("https://l2stuff.xyz/", headers=headers, timeout=10)
+        if response.status_code != 200:
+            print(f"Erro ao acessar o site: {response.status_code}")
+            return
 
-    if not raids_list:
-        print("Nenhum boss encontrado.")
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Procura pelas tabelas de raid do Chronos baseada na estrutura HTML fornecida
+        fields = []
+        
+        # Seleciona todas as tabelas de listagem de raids
+        tables = soup.find_all('table', class_='raid-list')
+        
+        for table in tables:
+            # Pega o título da categoria (ex: Field Raids, Golem Raids, etc.)
+            header_tr = table.find('thead')
+            category_name = "Raid"
+            if header_tr:
+                th_elem = header_tr.find_all('th')
+                if len(th_elem) > 1:
+                    category_name = th_elem[1].get_text(strip=True)
+
+            rows = table.find_all('tr')
+            for row in rows:
+                cols = row.find_all('td')
+                th_row = row.find('th', scope='row')
+                
+                if th_row and len(cols) >= 2:
+                    boss_name = th_row.get_text(strip=True)
+                    countdown = cols[0].get_text(strip=True)
+                    time_val = cols[1].get_text(strip=True)
+                    
+                    # Filtra apenas se tiver dados válidos
+                    if boss_name and countdown.startswith('T'):
+                        icon = "🔴" if "T+" in countdown else "🟢"
+                        fields.append({
+                            "name": f"{icon} {boss_name} ({category_name})",
+                            "value": f"⏳ Respawn: `{countdown}` | Previsto: `{time_val}`",
+                            "inline": False
+                        })
+
+    except Exception as e:
+        print(f"Erro ao processar o HTML: {e}")
         return
 
-    # Filtra rigorosamente pelo servidor Chronos (server 15) e remove itens inválidos
-    chronos = [r for r in raids_list if str(r.get("server", "15")) == "15" and r.get("name")]
-    
-    # Ordena pelo countdown (priorizando os mais próximos)
-    chronos.sort(key=lambda x: x.get("_countdown", x.get("countdown", "ZZZ")))
+    if not fields:
+        print("Nenhum boss extraído do HTML.")
+        return
 
-    fields = []
-    for r in chronos[:6]:
-        name = r.get("name", "Unknown Boss")
-        cd = r.get("_countdown", r.get("countdown", "N/A"))
-        tm = r.get("_time", r.get("time", "N/A"))
-        
-        # Formatação do ícone baseada no status do countdown
-        icon = "🔴" if "T+" in str(cd) else "🟢"
-        
-        fields.append({
-            "name": f"{icon} {name}",
-            "value": f"⏳ Respawn: `{cd}` | Previsto: `{tm}`",
-            "inline": False
-        })
-
+    # Limita aos primeiros 6 bosses para não estourar o limite do embed do Discord
     embed = {
         "title": "⏰ LEMBRETE DE BOSSES (Chronos)",
         "description": "Atualização automática de rotina.",
         "color": 10038562,
-        "fields": fields
+        "fields": fields[:6]
     }
 
     payload = {
@@ -100,6 +79,7 @@ def main():
         "allowed_mentions": {"parse": ["roles"]}
     }
 
+    print("Enviando para o Discord...")
     res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print(f"Status do envio: {res.status_code}")
 
