@@ -15,7 +15,7 @@ def format_time(ts):
     try:
         if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
             val = int(ts)
-            if val > 10000000000:  # Se estiver em milissegundos
+            if val > 10000000000:
                 val = val / 1000
             dt = datetime.fromtimestamp(val)
             return dt.strftime("%d/%m/%Y %H:%M")
@@ -74,15 +74,26 @@ def main():
     if not chronos_bosses:
         chronos_bosses = raids_list
 
-    chronos_bosses.sort(key=lambda x: x.get("_countdown", x.get("countdown", "ZZZ")))
+    # Remove duplicatas pelo nome do boss para exibir apenas a entrada mais próxima
+    unique_bosses = {}
+    for r in chronos_bosses:
+        name = r.get("name")
+        if not name:
+            continue
+        if name not in unique_bosses:
+            unique_bosses[name] = r
+
+    bosses_clean = list(unique_bosses.values())
+    bosses_clean.sort(key=lambda x: x.get("_countdown", x.get("countdown", "ZZZ")))
 
     fields = []
-    for r in chronos_bosses[:6]:
+    for r in bosses_clean[:6]:
         name = r.get("name", "Unknown Boss")
-        cd = r.get("_countdown", r.get("countdown", r.get("time_left", "N/A")))
-        tm = r.get("_time", r.get("time", r.get("respawn_time", "N/A")))
-        
-        # Converte o timestamp bruto para data legível
+        cd = r.get("_countdown", r.get("countdown", "N/A"))
+        if not cd or cd == "N/A":
+            cd = r.get("time_left", "N/A")
+            
+        tm = r.get("_time", r.get("time", "N/A"))
         tm_formatted = format_time(tm)
         
         icon = "🔴" if "T+" in str(cd) else "🟢"
