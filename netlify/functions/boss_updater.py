@@ -3,7 +3,7 @@ import os
 import requests
 from websocket import create_connection
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://discord.com/api/webhooks/1563256850504482939/G-rDLNKBVhjVhl_sNst-cDDIJqaO_dJLJzJ9fWFaL5bOGZ2PApeDnoxNs7JlED__NHrV")
+WEBHOOK_URL = 'https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN'
 ROLE_TAG = "@Bosses"
 
 def handler(event, context):
