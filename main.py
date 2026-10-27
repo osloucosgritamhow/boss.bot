@@ -57,7 +57,8 @@ def parse_time_and_countdown(ts, raw_cd=None):
                 hours = diff_seconds // 3600
                 minutes = (diff_seconds % 3600) // 60
                 seconds = diff_seconds % 60
-                cd = f"T-{hours:02d}:{minutes:02d}:{seconds:02d}"
+                cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                cd_text = f"O boss nasce em {cd_time}"
                 total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
                 is_passed = False
             else:
@@ -65,29 +66,24 @@ def parse_time_and_countdown(ts, raw_cd=None):
                 hours = diff_seconds // 3600
                 minutes = (diff_seconds % 3600) // 60
                 seconds = diff_seconds % 60
-                cd = f"T+{hours:02d}:{minutes:02d}:{seconds:02d}"
+                cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                cd_text = f"O boss já nasceu há {cd_time}"
                 total_mins = -(hours * 60 + minutes + (1 if seconds > 0 else 0))
                 is_passed = True
             
-            return cd, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec
+            return cd_text, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec
     except:
         pass
     
     if raw_cd and isinstance(raw_cd, str) and "T" in raw_cd:
         is_passed = "T+" in raw_cd
         clean = raw_cd.replace("T-", "").replace("T+", "").strip()
-        parts = clean.split(":")
-        if len(parts) == 3:
-            try:
-                h, m, s = map(int, parts)
-                total_mins = h * 60 + m
-                if is_passed:
-                    total_mins = -total_mins
-                return raw_cd, "Horário sob consulta", total_mins, is_passed, 0
-            except:
-                pass
+        if is_passed:
+            return f"O boss já nasceu há {clean}", "Horário sob consulta", -999, True, 0
+        else:
+            return f"O boss nasce em {clean}", "Horário sob consulta", 999, False, 0
 
-    return "N/A", "Horário sob consulta", 999999, False, 0
+    return "O boss nasce em N/A", "Horário sob consulta", 999999, False, 0
 
 def main():
     print("Conectando ao WebSocket para varredura completa...")
@@ -148,12 +144,12 @@ def main():
         raw_cd = r.get("_countdown", r.get("countdown"))
         raw_tm = r.get("_time", r.get("time", r.get("respawn_time")))
         
-        cd, tm_formatted, total_mins, is_passed, timestamp_sec = parse_time_and_countdown(raw_tm, raw_cd)
+        cd_text, tm_formatted, total_mins, is_passed, timestamp_sec = parse_time_and_countdown(raw_tm, raw_cd)
         
         if name not in unique_bosses:
             unique_bosses[name] = {
                 "name": name,
-                "cd": cd,
+                "cd": cd_text,
                 "tm": tm_formatted,
                 "mins": total_mins,
                 "passed": is_passed,
@@ -164,7 +160,7 @@ def main():
             if timestamp_sec > 0 and (existing["timestamp"] == 0 or timestamp_sec < existing["timestamp"]):
                 unique_bosses[name] = {
                     "name": name,
-                    "cd": cd,
+                    "cd": cd_text,
                     "tm": tm_formatted,
                     "mins": total_mins,
                     "passed": is_passed,
@@ -178,58 +174,50 @@ def main():
         print("Nenhum boss processado.")
         return
 
-    # 1. Envio do resumo geral (deploy e atualizações de 20 em 20 min)
-    fields = []
-    for r in bosses_clean[:10]:
-        icon = "🔴" if r["passed"] else "🟢"
-        fields.append({
-            "name": f"{icon} {r['name']}",
-            "value": f"⏳ Respawn: `{r['cd']}` | Previsto: `{r['tm']}`",
-            "inline": False
-        })
-
-    embed = {
-        "title": "⏰ LEMBRETE DE BOSSES (Chronos)",
-        "description": "Atualização automática de rotina.",
-        "color": 10038562,
-        "fields": fields
-    }
-
-    payload_summary = {
-        "content": f"{ROLE_TAG} **ATENÇÃO!** Próximos Raid Bosses do Chronos:",
-        "embeds": [embed],
-        "allowed_mentions": {"parse": ["roles"]}
-    }
-
-    print("Enviando resumo geral para o Discord...")
-    res = requests.post(WEBHOOK_URL, json=payload_summary, timeout=5)
-    print(f"Status do envio geral: {res.status_code}")
-
-    # 2. Alerta individual de 5 minutos exato
     state = load_state()
     state_updated = False
 
-    for boss in bosses_clean:
-        name = boss["name"]
-        mins = boss["mins"]
-        tm_formatted = boss["tm"]
+    # Envia uma notificação individual para cada boss (limitado aos 6 mais próximos)
+    for r in bosses_clean[:6]:
+        name = r["name"]
+        mins = r["mins"]
+        cd = r["cd"]
+        tm_formatted = r["tm"]
+        passed = r["passed"]
 
-        if 0 <= mins <= 5 and not boss["passed"]:
+        # Se faltam 5 minutos ou menos, dispara o alerta urgente de 5 min
+        if 0 <= mins <= 5 and not passed:
             alert_key = f"5min_{tm_formatted}"
             if state.get(name) == alert_key:
+                pass
+            else:
+                payload_urgent = {
+                    "content": f"{ROLE_TAG} 🚨 **Último aviso: boss {name} nascendo em 5 minutos!** (Previsão: `{tm_formatted}`)",
+                    "allowed_mentions": {"parse": ["roles"]}
+                }
+                print(f"Enviando alerta urgente de 5 min para: {name}")
+                requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
+                
+                state[name] = alert_key
+                state_updated = True
                 continue
 
-            payload_urgent = {
-                "content": f"{ROLE_TAG} 🚨 **Último aviso: boss {name} nascendo em 5 minutos!** (Previsão: `{tm_formatted}`)",
-                "allowed_mentions": {"parse": ["roles"]}
-            }
+        # Notificação individual padrão de rotina a cada execução/deploy
+        icon = "🔴" if passed else "🟢"
+        embed = {
+            "title": f"⚔️ AOG | RAID ALERT: {name.upper()}",
+            "description": f"⏳ **{cd}**\n📅 **Previsão:** `{tm_formatted}`",
+            "color": 15158332 if passed else 3066993
+        }
 
-            print(f"Enviando alerta de 5 minutos para: {name}")
-            res_u = requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
-            print(f"Status do alerta de 5 min: {res_u.status_code}")
+        payload_individual = {
+            "content": f"{ROLE_TAG} **Atualização de Boss:** `{name}`",
+            "embeds": [embed],
+            "allowed_mentions": {"parse": ["roles"]}
+        }
 
-            state[name] = alert_key
-            state_updated = True
+        print(f"Enviando notificação individual para: {name}")
+        requests.post(WEBHOOK_URL, json=payload_individual, timeout=5)
 
     if state_updated:
         save_state(state)
