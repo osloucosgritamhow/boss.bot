@@ -8,63 +8,46 @@ ROLE_TAG = "@Bosses"
 
 def main():
     raids_data = {}
-    session = requests.Session()
     
-    # 1. Acessa a página principal primeiro para capturar cookies e simular um navegador real
-    print("Acessando a página principal para obter sessão...")
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://l2stuff.xyz/"
-        }
-        session.get("https://l2stuff.xyz/", headers=headers, timeout=10)
-    except Exception as e:
-        print("Aviso ao carregar página principal:", e)
-
-    # Extrai os cookies obtidos na sessão HTTP para passar ao WebSocket
-    cookie_jar = session.cookies.get_dict()
-    cookie_string = "; ".join([f"{k}={v}" for k, v in cookie_jar.items()])
-
-    # 2. Tenta conectar ao WebSocket usando os cookies de sessão e headers completos
+    ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Cookie": cookie_string
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    urls_to_try = [
-        "wss://l2stuff.xyz/ws",
-        "wss://l2stuff.xyz/socket.io/?EIO=4&transport=websocket"
-    ]
-
-    ws = None
-    for ws_url in urls_to_try:
-        try:
-            print(f"Tentando conectar em: {ws_url}")
-            ws = create_connection(ws_url, header=ws_headers, timeout=10)
-            break
-        except Exception as e:
-            print(f"Falha na URL {ws_url}: {e}")
-
-    if not ws:
-        print("Erro crítico: Não foi possível estabelecer conexão WebSocket.")
+    print(f"Conectando em: {ws_url}")
+    try:
+        ws = create_connection(ws_url, header=ws_headers, timeout=15)
+    except Exception as e:
+        print("Erro crítico ao conectar no WebSocket:", e)
         return
 
     try:
-        for _ in range(3):
+        # Lê as mensagens iniciais enviadas pelo servidor do Angular até encontrar os raids
+        for _ in range(10):
             msg = ws.recv()
-            data = json.loads(msg)
-            if data.get("type") == "raidData":
-                for r in data.get("data", {}).get("raids", []):
-                    raids_data[r["idx"]] = r
-                break
+            try:
+                data = json.loads(msg)
+                # O payload pode vir direto como dicionário contendo 'type':'raidData' ou dentro de uma lista/estrutura
+                if isinstance(data, dict):
+                    if data.get("type") == "raidData":
+                        for r in data.get("data", {}).get("raids", []):
+                            raids_data[r["idx"]] = r
+                        break
+                    # Caso venha estruturado de outra forma no root
+                    elif "raids" in data:
+                        for r in data.get("raids", []):
+                            raids_data[r["idx"]] = r
+                        break
+            except json.JSONDecodeError:
+                continue
         ws.close()
     except Exception as e:
-        print("Erro ao receber dados do WebSocket:", e)
+        print("Erro ao processar mensagens do WebSocket:", e)
         return
 
     if not raids_data:
-        print("Não foi possível coletar os dados do WebSocket (dados vazios).")
+        print("Aviso: Dados de raids não encontrados nas mensagens iniciais. Tentando varredura ampla...")
         return
 
     chronos = [r for r in raids_data.values() if str(r.get("server")) == "15"]
