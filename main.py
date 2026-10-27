@@ -2,8 +2,8 @@ import json
 import socket
 import sys
 import os
-import subprocess
-from datetime import datetime, time, timedelta
+import time
+from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 import requests
 from websocket import create_connection
@@ -15,11 +15,11 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
-# Cronograma fixo e blindado de bosses
+# Cronograma fixo categorizado e blindado
 FIXED_BOSSES = [
-    {"name": "Stakato Queen", "times": [time(10, 0), time(13, 0), time(17, 0)]},
-    {"name": "Mega Chaos Golem", "times": [time(10, 0), time(13, 0), time(17, 0)]},
-    {"name": "Chaos Golem", "times": [time(11, 0), time(15, 0)]},
+    {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
+    {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
+    {"name": "Chaos Golem", "category": "GOLEM RAIDS", "times": [dtime(11, 0), dtime(15, 0)]},
 ]
 
 def load_state():
@@ -35,16 +35,6 @@ def save_state(state):
     try:
         with open(STATE_FILE, "w") as f:
             json.dump(state, f)
-    except:
-        pass
-
-def git_commit_state():
-    try:
-        subprocess.run(["git", "config", "--global", "user.name", "AOG Bot"], capture_output=True)
-        subprocess.run(["git", "config", "--global", "user.email", "bot@aog.internal"], capture_output=True)
-        subprocess.run(["git", "add", STATE_FILE], capture_output=True)
-        subprocess.run(["git", "commit", "-m", "update boss alert state [skip ci]"], capture_output=True)
-        subprocess.run(["git", "push"], capture_output=True)
     except:
         pass
 
@@ -102,6 +92,7 @@ def get_fixed_bosses_list():
 
     for item in FIXED_BOSSES:
         name = item["name"]
+        category = item["category"]
         for t in item["times"]:
             target_dt = datetime.combine(now.date(), t, tzinfo=tz)
             if target_dt < now:
@@ -118,6 +109,7 @@ def get_fixed_bosses_list():
             
             fixed_list.append({
                 "name": name,
+                "category": category,
                 "cd": cd_text,
                 "tm": target_dt.strftime("%d/%m/%Y %H:%M"),
                 "mins": total_mins,
@@ -127,8 +119,8 @@ def get_fixed_bosses_list():
             
     return fixed_list
 
-def main():
-    print("Iniciando varredura híbrida...")
+def run_bot_cycle():
+    print(f"[{datetime.now()}] Iniciando varredura híbrida com layout tático...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -191,6 +183,7 @@ def main():
         if name not in unique_bosses:
             unique_bosses[name] = {
                 "name": name,
+                "category": "FIELD RAIDS",
                 "cd": cd_text,
                 "tm": tm_formatted,
                 "mins": total_mins,
@@ -202,6 +195,7 @@ def main():
             if timestamp_sec > 0 and (existing["timestamp"] == 0 or timestamp_sec < existing["timestamp"]):
                 unique_bosses[name] = {
                     "name": name,
+                    "category": "FIELD RAIDS",
                     "cd": cd_text,
                     "tm": tm_formatted,
                     "mins": total_mins,
@@ -215,13 +209,13 @@ def main():
     bosses_clean.sort(key=lambda x: abs(x["mins"]) if x["mins"] != 999999 else 999999)
 
     if not bosses_clean:
-        print("Nenhum boss processado.")
+        print("Nenhum boss processado neste ciclo.")
         return
 
     state = load_state()
     state_updated = False
 
-    # 1. Processamento de Alertas Urgentes de 5 Minutos (individuais e críticos)
+    # 1. Alertas Críticos de 5 minutos
     for r in bosses_clean:
         name = r["name"]
         mins = r["mins"]
@@ -234,12 +228,13 @@ def main():
                 continue
             
             embed_urgent = {
-                "title": "🚨 ALERTA CRÍTICO: BOSS NASCENDO!",
-                "description": f"O boss **{name.upper()}** vai nascer em breve!\n\n⏳ **Status:** Faltam menos de 5 minutos!\n📅 **Previsão:** `{tm_formatted}`",
-                "color": 15158332
+                "title": "🚨 AOG | ALERTA DE JANELA DE BOSS",
+                "description": f"Uma janela de Raid Boss está se aproximando. Fique atento!\n\n🎯 **Boss:** `{name.upper()}`\n⏳ **Status:** Janela crítica iminente (menos de 5 min)\n📅 **Nascimento Estimado:** `{tm_formatted}`",
+                "color": 15158332,
+                "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
             }
             payload_urgent = {
-                "content": f"{ROLE_TAG} **Último aviso: boss {name} nascendo em 5 minutos!**",
+                "content": f"{ROLE_TAG} **Atenção clã! O boss {name} vai nascer em 5 minutos!**",
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_urgent]
             }
@@ -249,36 +244,43 @@ def main():
             state[name] = alert_key
             state_updated = True
 
-    # 2. Painel de Rotina Consolidado (Enviado em UMA ÚNICA mensagem limpa)
+    if state_updated:
+        save_state(state)
+
+    # 2. Painel Consolidado com Layout Tático Organizado
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
         fields.append({
-            "name": f"{icon} {r['name']}",
-            "value": f"> ⏳ **{r['cd']}**\n> 📅 **Previsão:** `{r['tm']}`",
+            "name": f"{icon} [{r['category']}] {r['name']}",
+            "value": f"> ⏳ **Tempo até o spawn:** `{r['cd'].replace('Nasce em ', '')}`\n> 📅 **Nascimento Estimado:** `{r['tm']}`",
             "inline": False
         })
 
     embed_dashboard = {
-        "title": "⚔️ AOG | PAINEL DE RAID BOSSES (CHRONOS)",
-        "description": "Status atualizado dos próximos respawns do servidor.",
+        "title": "⚔️ AOG | RAID BOSS ALERT",
+        "description": "Janelas de respawn ativas monitoradas no servidor Chronos. Fique atento às movimentações!",
         "color": 3447003,
         "fields": fields,
-        "footer": {"text": "AOG Bot • Atualização automática a cada 20 min"}
+        "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
     }
 
     payload_dashboard = {
-        "content": f"{ROLE_TAG} **Atualização do Painel de Bosses:**",
+        "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
         "allowed_mentions": {"parse": ["roles"]},
         "embeds": [embed_dashboard]
     }
 
-    print("Enviando painel de rotina consolidado...")
+    print("Enviando painel tático consolidado...")
     requests.post(WEBHOOK_URL, json=payload_dashboard, timeout=5)
 
-    if state_updated:
-        save_state(state)
-        git_commit_state()
-
 if __name__ == "__main__":
-    main()
+    print("Bot AOG RaidAPP iniciado em modo contínuo (loop de 20 minutos)...")
+    while True:
+        try:
+            run_bot_cycle()
+        except Exception as e:
+            print(f"Erro inesperado no ciclo do bot: {e}")
+        
+        print("Aguardando 20 minutos para o próximo ciclo...")
+        time.sleep(1200)
