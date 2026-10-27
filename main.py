@@ -7,6 +7,7 @@ WEBHOOK_URL = 'https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "@Bosses"
 
 def main():
+    print("Iniciando o bot de Raid Bosses...")
     raids_data = {}
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
@@ -17,39 +18,42 @@ def main():
 
     print(f"Conectando em: {ws_url}")
     try:
-        ws = create_connection(ws_url, header=ws_headers, timeout=15)
+        ws = create_connection(ws_url, header=ws_headers, timeout=10)
+        print("Conexão WebSocket estabelecida com sucesso!")
     except Exception as e:
         print("Erro crítico ao conectar no WebSocket:", e)
         return
 
     try:
-        # Lê as mensagens iniciais enviadas pelo servidor do Angular até encontrar os raids
-        for _ in range(10):
-            msg = ws.recv()
+        print("Aguardando dados do WebSocket...")
+        ws.settimeout(10)
+        for i in range(5):
             try:
+                msg = ws.recv()
+                print(f"Mensagem {i+1} recebida.")
                 data = json.loads(msg)
-                # O payload pode vir direto como dicionário contendo 'type':'raidData' ou dentro de uma lista/estrutura
                 if isinstance(data, dict):
                     if data.get("type") == "raidData":
                         for r in data.get("data", {}).get("raids", []):
                             raids_data[r["idx"]] = r
                         break
-                    # Caso venha estruturado de outra forma no root
                     elif "raids" in data:
                         for r in data.get("raids", []):
                             raids_data[r["idx"]] = r
                         break
-            except json.JSONDecodeError:
-                continue
+            except Exception as inner_e:
+                print(f"Tentativa {i+1} falhou ou timeout: {inner_e}")
+                break
         ws.close()
     except Exception as e:
         print("Erro ao processar mensagens do WebSocket:", e)
         return
 
     if not raids_data:
-        print("Aviso: Dados de raids não encontrados nas mensagens iniciais. Tentando varredura ampla...")
+        print("Aviso: Nenhum dado de raid foi capturado.")
         return
 
+    print(f"Total de raids capturados: {len(raids_data)}")
     chronos = [r for r in raids_data.values() if str(r.get("server")) == "15"]
     chronos.sort(key=lambda x: x.get("_countdown", ""))
 
@@ -81,6 +85,7 @@ def main():
         "allowed_mentions": {"parse": ["roles"]}
     }
 
+    print("Enviando dados para o Discord...")
     res = requests.post(WEBHOOK_URL, json=payload)
     print("Status do envio para o Discord:", res.status_code)
 
