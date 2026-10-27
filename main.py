@@ -28,7 +28,7 @@ def save_state(state):
         with open(STATE_FILE, "w") as f:
             json.dump(state, f)
     except:
-            pass
+        pass
 
 def git_commit_state():
     try:
@@ -70,7 +70,7 @@ def format_time(ts):
     return str(ts)
 
 def main():
-    print("Iniciando varredura completa de bosses (Field, Golems, Swamp, Plunderous)...")
+    print("Iniciando varredura completa de bosses (Field, Golems, Swamp, Plunderous, Atrus)...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -115,7 +115,7 @@ def main():
 
     extract_raids(raw_data)
 
-    # Filtra rigorosamente pelo Chronos (server 15)
+    # Filtra rigorosamente pelo servidor Chronos (server 15)
     chronos_bosses = [r for r in raids_list if str(r.get("server", "15")) == "15"]
     if not chronos_bosses:
         chronos_bosses = raids_list
@@ -139,57 +139,61 @@ def main():
             if abs(mins) < abs(unique_bosses[name]["mins"]):
                 unique_bosses[name] = {"name": name, "cd": cd, "tm": tm_formatted, "mins": mins, "passed": is_passed}
 
+    bosses_clean = list(unique_bosses.values())
+    bosses_clean.sort(key=lambda x: x["mins"] if x["mins"] != 999999 else 999999)
+
+    # 1. Envio obrigatório do painel geral de status a cada execução (Deploy / Rotina de 20 em 20 min)
+    fields = []
+    for r in bosses_clean[:6]:
+        icon = "🔴" if r["passed"] else "🟢"
+        fields.append({
+            "name": f"{icon} {r['name']}",
+            "value": f"⏳ Respawn: `{r['cd']}` | Previsto: `{r['tm']}`",
+            "inline": False
+        })
+
+    embed = {
+        "title": "⏰ LEMBRETE DE BOSSES (Chronos)",
+        "description": "Atualização automática de rotina.",
+        "color": 10038562,
+        "fields": fields
+    }
+
+    payload_summary = {
+        "content": f"{ROLE_TAG} **ATENÇÃO!** Próximos Raid Bosses do Chronos:",
+        "embeds": [embed],
+        "allowed_mentions": {"parse": ["roles"]}
+    }
+
+    print("Enviando resumo geral do deploy/rotina para o Discord...")
+    res = requests.post(WEBHOOK_URL, json=payload_summary, timeout=5)
+    print(f"Status do envio geral: {res.status_code}")
+
+    # 2. Verificação do alerta individual de 5 minutos para cada boss
     state = load_state()
     state_updated = False
-    now_str = datetime.now().strftime("%Y-%m-%d")
 
-    for name, boss in unique_bosses.items():
+    for boss in bosses_clean:
+        name = boss["name"]
         mins = boss["mins"]
-        cd = boss["cd"]
         tm_formatted = boss["tm"]
-        
-        # Define as janelas de alerta:
-        # - Alerta de 20 min (entra na janela de 20 min ou menos)
-        # - Alerta de 5 min (entra na janela de 5 min ou menos, ou já nasceu T+)
-        is_urgent = mins <= 5 or boss["passed"]
-        is_normal = mins <= 20 and not is_urgent
 
-        alert_type = None
-        if is_urgent:
-            alert_type = f"urgent_{tm_formatted}"
-        elif is_normal:
-            alert_type = f"normal_{tm_formatted}"
+        # Se faltam 5 minutos ou menos e o boss ainda não nasceu (T-)
+        if 0 <= mins <= 5 and not boss["passed"]:
+            alert_key = f"5min_{tm_formatted}"
+            if state.get(name) == alert_key:
+                continue  # Já foi notificado para este respawn
 
-        if alert_type:
-            # Verifica se já mandamos esse alerta específico para este respawn
-            if state.get(name) == alert_type:
-                continue
-
-            # Monta a notificação individual limpa e clara
-            if boss["passed"]:
-                status_txt = f"🔴 **O boss já nasceu / expirou!** (`{cd}`)"
-            elif mins <= 5:
-                status_txt = f"🚨 **ATENÇÃO MÁXIMA! Nascerá em até 05:00 min!** (`{cd}`)"
-            else:
-                status_txt = f"⏳ **Alerta de rotina: Nascerá em breve.** (`{cd}`)"
-
-            embed = {
-                "title": f"⚔️ AOG | RAID ALERT: {name.upper()}",
-                "description": f"{status_txt}\n\n📅 **Horário Previsto:** `{tm_formatted}`",
-                "color": 15158332 if is_urgent else 3066993
-            }
-
-            payload = {
-                "content": f"{ROLE_TAG} **Alerta de Raid Boss:** `{name}`",
-                "embeds": [embed],
+            payload_urgent = {
+                "content": f"{ROLE_TAG} 🚨 **Último aviso: boss {name} nascendo em 5 minutos!** (Previsão: `{tm_formatted}`)",
                 "allowed_mentions": {"parse": ["roles"]}
             }
 
-            print(f"Enviando notificação individual para: {name} ({cd})")
-            res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
-            print(f"Status do envio: {res.status_code}")
+            print(f"Enviando alerta de 5 minutos para: {name}")
+            res_u = requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
+            print(f"Status do alerta de 5 min: {res_u.status_code}")
 
-            state[name] = alert_type
+            state[name] = alert_key
             state_updated = True
 
     if state_updated:
