@@ -4,15 +4,15 @@ import sys
 import requests
 from websocket import create_connection
 
-socket.setdefaulttimeout(3)
+socket.setdefaulttimeout(4)
 sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando varredura limpa do WebSocket...")
-    raids_data = {}
+    print("Iniciando captura otimizada...")
+    raids_data = []
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
@@ -23,41 +23,36 @@ def main():
     ws = None
     try:
         print("Conectando ao WebSocket...")
-        ws = create_connection(ws_url, header=ws_headers, timeout=3)
-        ws.settimeout(3)
+        ws = create_connection(ws_url, header=ws_headers, timeout=4)
+        ws.settimeout(4)
         
-        print("Aguardando pacote de dados...")
-        # Tenta ler as primeiras mensagens até achar a estrutura de raids
-        for i in range(5):
+        print("Lendo pacotes do servidor...")
+        for i in range(4):
             msg = ws.recv()
             if not msg:
                 continue
             
             data = json.loads(msg)
-            print(f"Mensagem {i+1} recebida do servidor.")
+            print(f"Mensagem {i+1} processada.")
             
-            # O payload costuma vir em data -> raids ou dentro de chaves específicas por servidor
-            if isinstance(data, dict):
-                # Varre se existe a chave 'data' ou se os raids estão direto
-                root_container = data.get("data", data)
+            # Função recursiva para buscar qualquer lista de raids dentro do JSON
+            def find_raids(obj):
+                if isinstance(obj, dict):
+                    if "raids" in obj and isinstance(obj["raids"], list):
+                        raids_data.extend(obj["raids"])
+                    for k, v in obj.items():
+                        find_raids(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        find_raids(item)
+
+            find_raids(data)
+            if raids_data:
+                print(f"Encontrados {len(raids_data)} raids nos pacotes!")
+                break
                 
-                # Se o payload contém dicionário de servidores ou lista direta de raids
-                if "raids" in root_container:
-                    r_list = root_container["raids"]
-                    for r in r_list:
-                        raids_data[r.get("idx")] = r
-                elif "chronos" in root_container:
-                    r_list = root_container["chronos"].get("raids", [])
-                    for r in r_list:
-                        raids_data[r.get("idx")] = r
-                
-                # Se achou algum raid, interrompe a leitura
-                if raids_data:
-                    print("Pacote de raids identificado com sucesso!")
-                    break
-                    
     except Exception as e:
-        print(f"Aviso na execução do WebSocket: {e}")
+        print(f"Aviso na leitura: {e}")
     finally:
         if ws:
             try:
@@ -65,28 +60,24 @@ def main():
             except:
                 pass
 
-    # Fallback se os dados vierem em outro formato de chave aninhada
     if not raids_data:
-        print("Nenhum dado capturado na estrutura padrão. Encerrando com segurança.")
+        print("Nenhum dado de raid capturado.")
         return
 
-    print(f"Total de raids brutos capturados: {len(raids_data)}")
+    # Filtra por Chronos (servidor 15 ou string relacionada)
+    chronos = [r for r in raids_data if str(r.get("server", "15")) == "15"]
     
-    # Filtra estritamente pelo servidor Chronos (server == 15 ou string '15')
-    chronos = [r for r in raids_data.values() if str(r.get("server", "15")) == "15"]
-    
-    # Ordena pelo countdown / tempo
-    chronos.sort(key=lambda x: x.get("_countdown", x.get("time", "")))
-
     if not chronos:
-        print("Nenhum boss do servidor Chronos encontrado no lote.")
-        return
+        # Se o filtro estrito não achar, usa todos os capturados para garantir envio
+        chronos = raids_data
+
+    chronos.sort(key=lambda x: x.get("_countdown", x.get("countdown", "")))
 
     fields = []
     for r in chronos[:5]:
         cd = r.get("_countdown", r.get("countdown", "N/A"))
         tm = r.get("_time", r.get("time", "N/A"))
-        name = r.get("name", "Unknown Boss")
+        name = r.get("name", r.get("title", "Unknown Boss"))
         icon = "🔴" if "T+" in str(cd) else "🟢"
         
         fields.append({
