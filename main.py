@@ -40,37 +40,57 @@ def git_commit_state():
     except:
         pass
 
-def parse_countdown_to_minutes(cd_str):
-    try:
-        if not cd_str or "N/A" in cd_str:
-            return 999999, False
-        
-        is_passed = "T+" in cd_str
-        clean_str = cd_str.replace("T-", "").replace("T+", "").strip()
-        parts = clean_str.split(":")
-        
-        if len(parts) == 3:
-            h, m, s = map(int, parts)
-            total_minutes = h * 60 + m + (1 if s > 0 else 0)
-            return (-total_minutes if is_passed else total_minutes), is_passed
-    except:
-        pass
-    return 999999, False
-
-def format_time(ts):
+def parse_time_and_countdown(ts, raw_cd=None):
     try:
         if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
             val = int(ts)
             if val > 10000000000:
-                val = val / 1000
-            dt = datetime.fromtimestamp(val)
-            return dt.strftime("%d/%m/%Y %H:%M")
+                val_sec = val / 1000
+            else:
+                val_sec = val
+            
+            target_dt = datetime.fromtimestamp(val_sec)
+            now_dt = datetime.now()
+            diff_seconds = int((target_dt - now_dt).total_seconds())
+            
+            if diff_seconds >= 0:
+                hours = diff_seconds // 3600
+                minutes = (diff_seconds % 3600) // 60
+                seconds = diff_seconds % 60
+                cd = f"T-{hours:02d}:{minutes:02d}:{seconds:02d}"
+                total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
+                is_passed = False
+            else:
+                diff_seconds = abs(diff_seconds)
+                hours = diff_seconds // 3600
+                minutes = (diff_seconds % 3600) // 60
+                seconds = diff_seconds % 60
+                cd = f"T+{hours:02d}:{minutes:02d}:{seconds:02d}"
+                total_mins = -(hours * 60 + minutes + (1 if seconds > 0 else 0))
+                is_passed = True
+            
+            return cd, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec
     except:
         pass
-    return str(ts)
+    
+    if raw_cd and isinstance(raw_cd, str) and "T" in raw_cd:
+        is_passed = "T+" in raw_cd
+        clean = raw_cd.replace("T-", "").replace("T+", "").strip()
+        parts = clean.split(":")
+        if len(parts) == 3:
+            try:
+                h, m, s = map(int, parts)
+                total_mins = h * 60 + m
+                if is_passed:
+                    total_mins = -total_mins
+                return raw_cd, "Horário sob consulta", total_mins, is_passed, 0
+            except:
+                pass
+
+    return "N/A", "Horário sob consulta", 999999, False, 0
 
 def main():
-    print("Iniciando varredura completa de bosses (Field, Golems, Swamp, Plunderous, Atrus)...")
+    print("Conectando ao WebSocket para varredura completa...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -105,7 +125,7 @@ def main():
     raids_list = []
     def extract_raids(obj):
         if isinstance(obj, dict):
-            if "name" in obj and ("_countdown" in obj or "countdown" in obj or "_time" in obj or "time" in obj):
+            if ("name" in obj or "title" in obj) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
                 raids_list.append(obj)
             for v in obj.values():
                 extract_raids(v)
@@ -115,36 +135,52 @@ def main():
 
     extract_raids(raw_data)
 
-    # Filtra rigorosamente pelo servidor Chronos (server 15)
     chronos_bosses = [r for r in raids_list if str(r.get("server", "15")) == "15"]
     if not chronos_bosses:
         chronos_bosses = raids_list
 
-    # Consolida bosses únicos mantendo o menor tempo/countdown
     unique_bosses = {}
     for r in chronos_bosses:
-        name = r.get("name")
+        name = r.get("name", r.get("title"))
         if not name:
             continue
         
-        cd = r.get("_countdown", r.get("countdown", "N/A"))
-        tm = r.get("_time", r.get("time", r.get("respawn_time", "N/A")))
-        tm_formatted = format_time(tm)
+        raw_cd = r.get("_countdown", r.get("countdown"))
+        raw_tm = r.get("_time", r.get("time", r.get("respawn_time")))
         
-        mins, is_passed = parse_countdown_to_minutes(cd)
+        cd, tm_formatted, total_mins, is_passed, timestamp_sec = parse_time_and_countdown(raw_tm, raw_cd)
         
         if name not in unique_bosses:
-            unique_bosses[name] = {"name": name, "cd": cd, "tm": tm_formatted, "mins": mins, "passed": is_passed}
+            unique_bosses[name] = {
+                "name": name,
+                "cd": cd,
+                "tm": tm_formatted,
+                "mins": total_mins,
+                "passed": is_passed,
+                "timestamp": timestamp_sec
+            }
         else:
-            if abs(mins) < abs(unique_bosses[name]["mins"]):
-                unique_bosses[name] = {"name": name, "cd": cd, "tm": tm_formatted, "mins": mins, "passed": is_passed}
+            existing = unique_bosses[name]
+            if timestamp_sec > 0 and (existing["timestamp"] == 0 or timestamp_sec < existing["timestamp"]):
+                unique_bosses[name] = {
+                    "name": name,
+                    "cd": cd,
+                    "tm": tm_formatted,
+                    "mins": total_mins,
+                    "passed": is_passed,
+                    "timestamp": timestamp_sec
+                }
 
     bosses_clean = list(unique_bosses.values())
-    bosses_clean.sort(key=lambda x: x["mins"] if x["mins"] != 999999 else 999999)
+    bosses_clean.sort(key=lambda x: abs(x["mins"]) if x["mins"] != 999999 else 999999)
 
-    # 1. Envio obrigatório do painel geral de status a cada execução (Deploy / Rotina de 20 em 20 min)
+    if not bosses_clean:
+        print("Nenhum boss processado.")
+        return
+
+    # 1. Envio do resumo geral (deploy e atualizações de 20 em 20 min)
     fields = []
-    for r in bosses_clean[:6]:
+    for r in bosses_clean[:10]:
         icon = "🔴" if r["passed"] else "🟢"
         fields.append({
             "name": f"{icon} {r['name']}",
@@ -165,11 +201,11 @@ def main():
         "allowed_mentions": {"parse": ["roles"]}
     }
 
-    print("Enviando resumo geral do deploy/rotina para o Discord...")
+    print("Enviando resumo geral para o Discord...")
     res = requests.post(WEBHOOK_URL, json=payload_summary, timeout=5)
     print(f"Status do envio geral: {res.status_code}")
 
-    # 2. Verificação do alerta individual de 5 minutos para cada boss
+    # 2. Alerta individual de 5 minutos exato
     state = load_state()
     state_updated = False
 
@@ -178,11 +214,10 @@ def main():
         mins = boss["mins"]
         tm_formatted = boss["tm"]
 
-        # Se faltam 5 minutos ou menos e o boss ainda não nasceu (T-)
         if 0 <= mins <= 5 and not boss["passed"]:
             alert_key = f"5min_{tm_formatted}"
             if state.get(name) == alert_key:
-                continue  # Já foi notificado para este respawn
+                continue
 
             payload_urgent = {
                 "content": f"{ROLE_TAG} 🚨 **Último aviso: boss {name} nascendo em 5 minutos!** (Previsão: `{tm_formatted}`)",
