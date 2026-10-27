@@ -2,7 +2,7 @@ import json
 import requests
 from websocket import create_connection
 
-WEBHOOK_URL = 'https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN'
+WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
 ROLE_TAG = "@Bosses"
 
 def main():
@@ -21,16 +21,13 @@ def main():
         ws.settimeout(3)
         
         print("Lendo mensagens do servidor...")
-        # Tenta ler até 10 mensagens para garantir que pega o pacote de raids
         for i in range(10):
             try:
                 msg = ws.recv()
                 data = json.loads(msg)
                 print(f"Mensagem {i+1} recebida.")
                 
-                # Procura onde os dados de raids estão escondidos no JSON
                 if isinstance(data, dict):
-                    # Formato 1: {"type": "raidData", "data": {"raids": [...]}}
                     if data.get("type") == "raidData":
                         raids_list = data.get("data", {}).get("raids", [])
                         if raids_list:
@@ -38,7 +35,6 @@ def main():
                                 raids_data[r["idx"]] = r
                             print("Dados de raids capturados com sucesso!")
                             break
-                    # Formato 2: raiz direta contendo "raids"
                     elif "raids" in data:
                         raids_list = data.get("raids", [])
                         if raids_list:
@@ -46,8 +42,7 @@ def main():
                                 raids_data[r["idx"]] = r
                             print("Dados de raids capturados com sucesso!")
                             break
-            except Exception as inner_e:
-                # Se der timeout ao esperar mais mensagens, ignora e segue
+            except Exception:
                 break
                 
         ws.close()
@@ -89,7 +84,7 @@ def main():
     }
 
     print("Enviando para o Discord...")
-    res = requests.post(https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN, json=payload, timeout=5)
+    res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print("Status do envio para o Discord:", res.status_code)
 
 if __name__ == "__main__":
