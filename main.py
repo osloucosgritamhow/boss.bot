@@ -1,5 +1,4 @@
 import json
-import socket
 import requests
 from websocket import create_connection
 
@@ -8,7 +7,6 @@ ROLE_TAG = "@Bosses"
 
 def main():
     print("Iniciando execução...")
-    socket.setdefaulttimeout(8)
     raids_data = {}
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
@@ -19,27 +17,24 @@ def main():
 
     try:
         print("Conectando ao WebSocket...")
-        ws = create_connection(ws_url, header=ws_headers, timeout=8)
-        ws.settimeout(8)
+        ws = create_connection(ws_url, header=ws_headers, timeout=5)
+        ws.settimeout(3) # Timeout estrito de 3 segundos para leitura
         
-        print("Aguardando pacotes de dados do servidor...")
-        # Tenta ler até 5 mensagens consecutivas para encontrar a que contém os raids
-        for _ in range(5):
-            msg = ws.recv()
-            data = json.loads(msg)
-            if isinstance(data, dict):
-                raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-                if raids_list:
-                    for r in raids_list:
-                        raids_data[r["idx"]] = r
-                    break
+        print("Aguardando dados do servidor...")
+        msg = ws.recv()
         ws.close()
+        
+        data = json.loads(msg)
+        if isinstance(data, dict):
+            raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
+            for r in raids_list:
+                raids_data[r["idx"]] = r
     except Exception as e:
-        print(f"Erro ou timeout na conexão: {e}")
+        print(f"Conexão finalizada por timeout ou aviso: {e}")
         return
 
     if not raids_data:
-        print("Nenhum dado de raid encontrado nas mensagens recebidas.")
+        print("Nenhum dado de raid retornado nesta tentativa.")
         return
 
     chronos = [r for r in raids_data.values() if str(r.get("server")) == "15"]
