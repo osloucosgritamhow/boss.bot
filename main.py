@@ -89,7 +89,7 @@ def main():
     }
 
     print("Enviando para o Discord...")
-    res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
+    res = requests.post(https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN, json=payload, timeout=5)
     print("Status do envio para o Discord:", res.status_code)
 
 if __name__ == "__main__":
