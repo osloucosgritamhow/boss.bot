@@ -6,7 +6,7 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando execução com controle rígido de tempo...")
+    print("Iniciando execução com varredura de mensagens...")
     raids_data = {}
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
@@ -18,20 +18,26 @@ def main():
     ws = None
     try:
         print("Conectando ao WebSocket...")
-        ws = create_connection(ws_url, header=ws_headers, timeout=4)
+        ws = create_connection(ws_url, header=ws_headers, timeout=5)
         ws.settimeout(3)
         
-        print("Lendo dados do servidor...")
-        msg = ws.recv()
-        data = json.loads(msg)
-        
-        if isinstance(data, dict):
-            raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-            for r in raids_list:
-                raids_data[r["idx"]] = r
+        print("Lendo pacotes do servidor...")
+        for i in range(8):
+            try:
+                msg = ws.recv()
+                data = json.loads(msg)
+                if isinstance(data, dict):
+                    raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
+                    if raids_list:
+                        for r in raids_list:
+                            raids_data[r["idx"]] = r
+                        print(f"Dados de raids capturados na tentativa {i+1}!")
+                        break
+            except Exception:
+                continue
                 
     except WebSocketTimeoutException:
-        print("Aviso: Timeout atingido ao aguardar dados do WebSocket.")
+        print("Aviso: Timeout atingido ao aguardar dados.")
     except Exception as e:
         print(f"Erro na conexão ou leitura: {e}")
     finally:
