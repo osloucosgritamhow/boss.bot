@@ -8,32 +8,46 @@ ROLE_TAG = "@Bosses"
 
 def main():
     raids_data = {}
+    session = requests.Session()
     
-    # Tentativa de conexão ajustada com headers simulando um navegador completo
+    # 1. Acessa a página principal primeiro para capturar cookies e simular um navegador real
+    print("Acessando a página principal para obter sessão...")
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://l2stuff.xyz/"
+        }
+        session.get("https://l2stuff.xyz/", headers=headers, timeout=10)
+    except Exception as e:
+        print("Aviso ao carregar página principal:", e)
+
+    # Extrai os cookies obtidos na sessão HTTP para passar ao WebSocket
+    cookie_jar = session.cookies.get_dict()
+    cookie_string = "; ".join([f"{k}={v}" for k, v in cookie_jar.items()])
+
+    # 2. Tenta conectar ao WebSocket usando os cookies de sessão e headers completos
+    ws_headers = {
+        "Origin": "https://l2stuff.xyz",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Cookie": cookie_string
+    }
+
     urls_to_try = [
         "wss://l2stuff.xyz/ws",
         "wss://l2stuff.xyz/socket.io/?EIO=4&transport=websocket"
     ]
-    
+
     ws = None
     for ws_url in urls_to_try:
         try:
             print(f"Tentando conectar em: {ws_url}")
-            ws = create_connection(
-                ws_url,
-                header={
-                    "Origin": "https://l2stuff.xyz",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-                },
-                timeout=10
-            )
+            ws = create_connection(ws_url, header=ws_headers, timeout=10)
             break
         except Exception as e:
             print(f"Falha na URL {ws_url}: {e}")
 
     if not ws:
-        print("Erro crítico: Não foi possível estabelecer conexão WebSocket em nenhuma das rotas.")
+        print("Erro crítico: Não foi possível estabelecer conexão WebSocket.")
         return
 
     try:
