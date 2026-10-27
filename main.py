@@ -11,13 +11,13 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando execução com requisição de dados...")
+    print("Iniciando varredura limpa do WebSocket...")
     raids_data = {}
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
     ws = None
@@ -26,26 +26,38 @@ def main():
         ws = create_connection(ws_url, header=ws_headers, timeout=3)
         ws.settimeout(3)
         
-        # Envia a solicitação que o site faz para o WebSocket liberar os dados dos raids
-        try:
-            ws.send(json.dumps({"action": "getRaids"}))
-        except:
-            pass
-
-        print("Lendo dados do servidor...")
-        # Lê algumas mensagens para pegar o pacote correto
-        for _ in range(3):
+        print("Aguardando pacote de dados...")
+        # Tenta ler as primeiras mensagens até achar a estrutura de raids
+        for i in range(5):
             msg = ws.recv()
-            if msg:
-                data = json.loads(msg)
-                if isinstance(data, dict):
-                    raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-                    if raids_list:
-                        for r in raids_list:
-                            raids_data[r["idx"]] = r
-                        break
+            if not msg:
+                continue
+            
+            data = json.loads(msg)
+            print(f"Mensagem {i+1} recebida do servidor.")
+            
+            # O payload costuma vir em data -> raids ou dentro de chaves específicas por servidor
+            if isinstance(data, dict):
+                # Varre se existe a chave 'data' ou se os raids estão direto
+                root_container = data.get("data", data)
+                
+                # Se o payload contém dicionário de servidores ou lista direta de raids
+                if "raids" in root_container:
+                    r_list = root_container["raids"]
+                    for r in r_list:
+                        raids_data[r.get("idx")] = r
+                elif "chronos" in root_container:
+                    r_list = root_container["chronos"].get("raids", [])
+                    for r in r_list:
+                        raids_data[r.get("idx")] = r
+                
+                # Se achou algum raid, interrompe a leitura
+                if raids_data:
+                    print("Pacote de raids identificado com sucesso!")
+                    break
+                    
     except Exception as e:
-        print(f"Aviso ou timeout na conexão: {e}")
+        print(f"Aviso na execução do WebSocket: {e}")
     finally:
         if ws:
             try:
@@ -53,20 +65,30 @@ def main():
             except:
                 pass
 
+    # Fallback se os dados vierem em outro formato de chave aninhada
     if not raids_data:
-        print("Nenhum dado capturado nesta execução.")
+        print("Nenhum dado capturado na estrutura padrão. Encerrando com segurança.")
         return
 
-    print(f"Processando {len(raids_data)} raids...")
-    chronos = [r for r in raids_data.values() if str(r.get("server")) == "15"]
-    chronos.sort(key=lambda x: x.get("_countdown", ""))
+    print(f"Total de raids brutos capturados: {len(raids_data)}")
+    
+    # Filtra estritamente pelo servidor Chronos (server == 15 ou string '15')
+    chronos = [r for r in raids_data.values() if str(r.get("server", "15")) == "15"]
+    
+    # Ordena pelo countdown / tempo
+    chronos.sort(key=lambda x: x.get("_countdown", x.get("time", "")))
+
+    if not chronos:
+        print("Nenhum boss do servidor Chronos encontrado no lote.")
+        return
 
     fields = []
     for r in chronos[:5]:
-        cd = r.get("_countdown", "N/A")
-        tm = r.get("_time", "N/A")
+        cd = r.get("_countdown", r.get("countdown", "N/A"))
+        tm = r.get("_time", r.get("time", "N/A"))
         name = r.get("name", "Unknown Boss")
         icon = "🔴" if "T+" in str(cd) else "🟢"
+        
         fields.append({
             "name": f"{icon} {name}",
             "value": f"⏳ Respawn: `{cd}` | Previsto: `{tm}`",
