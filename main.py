@@ -4,6 +4,7 @@ import sys
 import os
 import subprocess
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import requests
 from websocket import create_connection
 
@@ -41,6 +42,7 @@ def git_commit_state():
         pass
 
 def parse_time_and_countdown(ts, raw_cd=None):
+    tz = ZoneInfo("America/Sao_Paulo")
     try:
         if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
             val = int(ts)
@@ -49,8 +51,10 @@ def parse_time_and_countdown(ts, raw_cd=None):
             else:
                 val_sec = val
             
-            target_dt = datetime.fromtimestamp(val_sec)
-            now_dt = datetime.now()
+            # Converte o timestamp UTC do site para o Horário de Brasília
+            target_dt = datetime.fromtimestamp(val_sec, tz=ZoneInfo("UTC")).astimezone(tz)
+            now_dt = datetime.now(tz)
+            
             diff_seconds = int((target_dt - now_dt).total_seconds())
             
             if diff_seconds >= 0:
@@ -177,7 +181,6 @@ def main():
     state = load_state()
     state_updated = False
 
-    # Envia uma notificação individual para cada boss (limitado aos 6 mais próximos)
     for r in bosses_clean[:6]:
         name = r["name"]
         mins = r["mins"]
@@ -185,7 +188,6 @@ def main():
         tm_formatted = r["tm"]
         passed = r["passed"]
 
-        # Se faltam 5 minutos ou menos, dispara o alerta urgente de 5 min
         if 0 <= mins <= 5 and not passed:
             alert_key = f"5min_{tm_formatted}"
             if state.get(name) == alert_key:
@@ -202,7 +204,6 @@ def main():
                 state_updated = True
                 continue
 
-        # Notificação individual padrão de rotina a cada execução/deploy
         icon = "🔴" if passed else "🟢"
         embed = {
             "title": f"⚔️ AOG | RAID ALERT: {name.upper()}",
