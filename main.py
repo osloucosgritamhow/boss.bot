@@ -1,5 +1,7 @@
+import json
 import sys
 import requests
+from websocket import create_connection
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -7,81 +9,74 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Buscando dados na API do l2stuff...")
+    print("Conectando ao WebSocket oficial do l2stuff...")
     
-    headers = {
+    ws_url = "wss://ws.raids.l2stuff.xyz/"
+    ws_headers = {
         "Origin": "https://l2stuff.xyz",
-        "Referer": "https://l2stuff.xyz/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    raids_list = []
-    
-    # Tenta endpoints comuns de API REST do l2stuff
-    api_endpoints = [
-        "https://raids.l2stuff.xyz/api/raids",
-        "https://l2stuff.xyz/api/raids",
-        "https://ws.raids.l2stuff.xyz/api/raids"
-    ]
-
-    data = None
-    for url in api_endpoints:
-        try:
-            res = requests.get(url, headers=headers, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                print(f"Dados obtidos com sucesso de {url}")
+    raw_data = None
+    ws = None
+    try:
+        ws = create_connection(ws_url, header=ws_headers, timeout=5)
+        ws.settimeout(4)
+        
+        # Lê as mensagens iniciais da stream até capturar o payload de raids
+        for i in range(5):
+            msg = ws.recv()
+            if not msg:
+                continue
+            
+            parsed = json.loads(msg)
+            # Verifica se o pacote contém dados de raids ou estrutura de servidores
+            if isinstance(parsed, dict) and (("raids" in parsed) or ("data" in parsed) or ("chronos" in parsed)):
+                raw_data = parsed
+                print(f"Pacote de dados capturado na mensagem {i+1}!")
                 break
-        except Exception:
-            continue
+    except Exception as e:
+        print(f"Erro na conexão WebSocket: {e}")
+    finally:
+        if ws:
+            try:
+                ws.close()
+            except:
+                pass
 
-    # Se a API REST direta não responder, vamos buscar direto do endpoint de fallback públicos
-    if not data:
-        try:
-            # Endpoint alternativo de dados públicos de raids
-            res = requests.get("https://l2stuff.xyz/data/raids.json", headers=headers, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-        except Exception:
-            pass
-
-    if not data:
-        print("Aviso: A API REST direta exigiu o canal WebSocket. Realizando requisição via API de compatibilidade...")
-        # Caso os endpoints HTTP diretos estejam bloqueados, consultamos um mirror público de dados do L2
-        try:
-            res = requests.get("https://raw.githubusercontent.com/L2J/l2-raid-data/main/raids.json", timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-        except Exception:
-            pass
-
-    if not data:
-        print("Nenhum dado retornado pelas APIs.")
+    if not raw_data:
+        print("Nenhum dado capturado do WebSocket.")
         return
 
-    # Varre o JSON recursivamente para achar a lista de raids do Chronos (server 15)
+    # Extração recursiva de todos os bosses da estrutura recebida
+    raids_list = []
     def extract_raids(obj):
         if isinstance(obj, dict):
-            if "name" in obj and ("_countdown" in obj or "countdown" in obj or "time" in obj):
-                if str(obj.get("server", "15")) == "15":
-                    raids_list.append(obj)
+            # Identifica se o objeto é um boss válido pelo nome e countdown/tempo
+            if "name" in obj and ("_countdown" in obj or "countdown" in obj or "_time" in obj or "time" in obj):
+                raids_list.append(obj)
             for v in obj.values():
                 extract_raids(v)
         elif isinstance(obj, list):
             for item in obj:
                 extract_raids(item)
 
-    extract_raids(data)
+    extract_raids(raw_data)
 
     if not raids_list:
-        print("Estrutura de raids não identificada no JSON.")
+        print("Nenhum boss extraído do JSON.")
         return
 
-    # Ordena pelo countdown
-    raids_list.sort(key=lambda x: x.get("_countdown", x.get("countdown", "ZZZ")))
+    # Filtra estritamente pelo servidor Chronos (server '15')
+    chronos_bosses = [r for r in raids_list if str(r.get("server", "15")) == "15"]
+    if not chronos_bosses:
+        chronos_bosses = raids_list
+
+    # Ordena pelo countdown mais próximo
+    chronos_bosses.sort(key=lambda x: x.get("_countdown", x.get("countdown", "ZZZ")))
 
     fields = []
-    for r in raids_list[:6]:
+    for r in chronos_bosses[:6]:
         name = r.get("name", "Unknown Boss")
         cd = r.get("_countdown", r.get("countdown", "N/A"))
         tm = r.get("_time", r.get("time", "N/A"))
@@ -106,9 +101,9 @@ def main():
         "allowed_mentions": {"parse": ["roles"]}
     }
 
-    print("Enviando para o Discord...")
+    print("Enviando dados para o Discord...")
     res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
-    print(f"Status do envio: {res.status_code}")
+    print(f"Status do envio para o Discord: {res.status_code}")
 
 if __name__ == "__main__":
     main()
