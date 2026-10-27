@@ -15,10 +15,7 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8M
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
-# ==========================================
-# CRONOGRAMA FIXO E BLINDADO DE BOSSES
-# ==========================================
-# Defina aqui os horários diários (Hora, Minuto) para os bosses de horário fixo.
+# Cronograma fixo e blindado de bosses
 FIXED_BOSSES = [
     {"name": "Stakato Queen", "times": [time(10, 0), time(13, 0), time(17, 0)]},
     {"name": "Mega Chaos Golem", "times": [time(10, 0), time(13, 0), time(17, 0)]},
@@ -71,7 +68,7 @@ def parse_time_and_countdown(ts, raw_cd=None):
                 minutes = (diff_seconds % 3600) // 60
                 seconds = diff_seconds % 60
                 cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                cd_text = f"O boss nasce em {cd_time}"
+                cd_text = f"Nasce em {cd_time}"
                 total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
                 is_passed = False
             else:
@@ -80,7 +77,7 @@ def parse_time_and_countdown(ts, raw_cd=None):
                 minutes = (diff_seconds % 3600) // 60
                 seconds = diff_seconds % 60
                 cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                cd_text = f"O boss já nasceu há {cd_time}"
+                cd_text = f"Já nasceu há {cd_time}"
                 total_mins = -(hours * 60 + minutes + (1 if seconds > 0 else 0))
                 is_passed = True
             
@@ -92,14 +89,13 @@ def parse_time_and_countdown(ts, raw_cd=None):
         is_passed = "T+" in raw_cd
         clean = raw_cd.replace("T-", "").replace("T+", "").strip()
         if is_passed:
-            return f"O boss já nasceu há {clean}", "Horário sob consulta", -999, True, 0
+            return f"Já nasceu há {clean}", "Horário sob consulta", -999, True, 0
         else:
-            return f"O boss nasce em {clean}", "Horário sob consulta", 999, False, 0
+            return f"Nasce em {clean}", "Horário sob consulta", 999, False, 0
 
-    return "O boss nasce em N/A", "Horário sob consulta", 999999, False, 0
+    return "Nasce em N/A", "Horário sob consulta", 999999, False, 0
 
 def get_fixed_bosses_list():
-    """Gera dinamicamente os próximos horários dos bosses fixos com base no horário atual de Brasília"""
     tz = ZoneInfo("America/Sao_Paulo")
     now = datetime.now(tz)
     fixed_list = []
@@ -107,10 +103,7 @@ def get_fixed_bosses_list():
     for item in FIXED_BOSSES:
         name = item["name"]
         for t in item["times"]:
-            # Cria o datetime para hoje com o horário fixo
             target_dt = datetime.combine(now.date(), t, tzinfo=tz)
-            
-            # Se o horário de hoje já passou, calcula para o mesmo horário de amanhã
             if target_dt < now:
                 target_dt += timedelta(days=1)
             
@@ -120,7 +113,7 @@ def get_fixed_bosses_list():
             seconds = diff_seconds % 60
             
             cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            cd_text = f"O boss nasce em {cd_time}"
+            cd_text = f"Nasce em {cd_time}"
             total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
             
             fixed_list.append({
@@ -135,7 +128,7 @@ def get_fixed_bosses_list():
     return fixed_list
 
 def main():
-    print("Iniciando varredura híbrida (WebSocket + Cronograma Fixo)...")
+    print("Iniciando varredura híbrida...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -155,7 +148,7 @@ def main():
                     raw_data = parsed
                     break
     except Exception as e:
-        print(f"Aviso na conexão WebSocket (seguindo com bosses fixos): {e}")
+        print(f"Aviso WebSocket: {e}")
     finally:
         if ws:
             try:
@@ -182,14 +175,11 @@ def main():
         chronos_bosses = raids_list
 
     unique_bosses = {}
-    
-    # 1. Processa os bosses dinâmicos do site (Field Raids, etc.)
     for r in chronos_bosses:
         name = r.get("name", r.get("title"))
         if not name:
             continue
         
-        # Ignora nomes que são puramente os fixos para evitar duplicidade com a tabela estática
         if any(f["name"].lower() in name.lower() for f in FIXED_BOSSES):
             continue
         
@@ -220,12 +210,8 @@ def main():
                 }
 
     bosses_clean = list(unique_bosses.values())
-
-    # 2. Adiciona os bosses de horário fixo blindados diretamente no código
     fixed_clean = get_fixed_bosses_list()
     bosses_clean.extend(fixed_clean)
-
-    # Ordena do menor tempo para o maior
     bosses_clean.sort(key=lambda x: abs(x["mins"]) if x["mins"] != 999999 else 999999)
 
     if not bosses_clean:
@@ -235,47 +221,60 @@ def main():
     state = load_state()
     state_updated = False
 
-    # Processa os 6 bosses mais próximos
-    for r in bosses_clean[:6]:
+    # 1. Processamento de Alertas Urgentes de 5 Minutos (individuais e críticos)
+    for r in bosses_clean:
         name = r["name"]
         mins = r["mins"]
-        cd = r["cd"]
         tm_formatted = r["tm"]
         passed = r["passed"]
 
-        # Disparo do alerta urgente de 5 minutos
         if 0 <= mins <= 5 and not passed:
             alert_key = f"5min_{tm_formatted}"
             if state.get(name) == alert_key:
-                pass
-            else:
-                payload_urgent = {
-                    "content": f"{ROLE_TAG} 🚨 **Último aviso: boss {name} nascendo em 5 minutos!** (Previsão: `{tm_formatted}`)",
-                    "allowed_mentions": {"parse": ["roles"]}
-                }
-                print(f"Enviando alerta urgente de 5 min para: {name}")
-                requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
-                
-                state[name] = alert_key
-                state_updated = True
                 continue
+            
+            embed_urgent = {
+                "title": "🚨 ALERTA CRÍTICO: BOSS NASCENDO!",
+                "description": f"O boss **{name.upper()}** vai nascer em breve!\n\n⏳ **Status:** Faltam menos de 5 minutos!\n📅 **Previsão:** `{tm_formatted}`",
+                "color": 15158332
+            }
+            payload_urgent = {
+                "content": f"{ROLE_TAG} **Último aviso: boss {name} nascendo em 5 minutos!**",
+                "allowed_mentions": {"parse": ["roles"]},
+                "embeds": [embed_urgent]
+            }
+            print(f"Enviando alerta urgente de 5 min para: {name}")
+            requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
+            
+            state[name] = alert_key
+            state_updated = True
 
-        # Notificação individual de rotina
-        icon = "🔴" if passed else "🟢"
-        embed = {
-            "title": f"⚔️ AOG | RAID ALERT: {name.upper()}",
-            "description": f"⏳ **{cd}**\n📅 **Previsão:** `{tm_formatted}`",
-            "color": 15158332 if passed else 3066993
-        }
+    # 2. Painel de Rotina Consolidado (Enviado em UMA ÚNICA mensagem limpa)
+    fields = []
+    for r in bosses_clean[:6]:
+        icon = "🔴" if r["passed"] else "🟢"
+        fields.append({
+            "name": f"{icon} {r['name']}",
+            "value": f"> ⏳ **{r['cd']}**\n> 📅 **Previsão:** `{r['tm']}`",
+            "inline": False
+        })
 
-        payload_individual = {
-            "content": f"{ROLE_TAG} **Atualização de Boss:** `{name}`",
-            "allowed_mentions": {"parse": ["roles"]},
-            "embeds": [embed]
-        }
+    embed_dashboard = {
+        "title": "⚔️ AOG | PAINEL DE RAID BOSSES (CHRONOS)",
+        "description": "Status atualizado dos próximos respawns do servidor.",
+        "color": 3447003,
+        "fields": fields,
+        "footer": {"text": "AOG Bot • Atualização automática a cada 20 min"}
+    }
 
-        print(f"Enviando notificação individual para: {name}")
-        requests.post(WEBHOOK_URL, json=payload_individual, timeout=5)
+    payload_dashboard = {
+        "content": f"{ROLE_TAG} **Atualização do Painel de Bosses:**",
+        "allowed_mentions": {"parse": ["roles"]},
+        "embeds": [embed_dashboard]
+    }
+
+    print("Enviando painel de rotina consolidado...")
+    requests.post(WEBHOOK_URL, json=payload_dashboard, timeout=5)
 
     if state_updated:
         save_state(state)
