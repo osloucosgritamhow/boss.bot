@@ -18,23 +18,45 @@ def main():
     try:
         print("Conectando ao WebSocket...")
         ws = create_connection(ws_url, header=ws_headers, timeout=5)
-        ws.settimeout(3) # Timeout estrito de 3 segundos para leitura
+        ws.settimeout(3)
         
-        print("Aguardando dados do servidor...")
-        msg = ws.recv()
+        print("Lendo mensagens do servidor...")
+        # Tenta ler até 10 mensagens para garantir que pega o pacote de raids
+        for i in range(10):
+            try:
+                msg = ws.recv()
+                data = json.loads(msg)
+                print(f"Mensagem {i+1} recebida.")
+                
+                # Procura onde os dados de raids estão escondidos no JSON
+                if isinstance(data, dict):
+                    # Formato 1: {"type": "raidData", "data": {"raids": [...]}}
+                    if data.get("type") == "raidData":
+                        raids_list = data.get("data", {}).get("raids", [])
+                        if raids_list:
+                            for r in raids_list:
+                                raids_data[r["idx"]] = r
+                            print("Dados de raids capturados com sucesso!")
+                            break
+                    # Formato 2: raiz direta contendo "raids"
+                    elif "raids" in data:
+                        raids_list = data.get("raids", [])
+                        if raids_list:
+                            for r in raids_list:
+                                raids_data[r["idx"]] = r
+                            print("Dados de raids capturados com sucesso!")
+                            break
+            except Exception as inner_e:
+                # Se der timeout ao esperar mais mensagens, ignora e segue
+                break
+                
         ws.close()
-        
-        data = json.loads(msg)
-        if isinstance(data, dict):
-            raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-            for r in raids_list:
-                raids_data[r["idx"]] = r
     except Exception as e:
-        print(f"Conexão finalizada por timeout ou aviso: {e}")
+        print(f"Erro na conexão: {e}")
         return
 
     if not raids_data:
-        print("Nenhum dado de raid retornado nesta tentativa.")
+        print("Aviso: Nenhuma lista de raids foi encontrada nas mensagens.")
         return
 
     chronos = [r for r in raids_data.values() if str(r.get("server")) == "15"]
@@ -66,6 +88,7 @@ def main():
         "allowed_mentions": {"parse": ["roles"]}
     }
 
+    print("Enviando para o Discord...")
     res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print("Status do envio para o Discord:", res.status_code)
 
