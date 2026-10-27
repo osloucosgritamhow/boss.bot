@@ -17,20 +17,29 @@ def main():
 
     ws = None
     try:
-        print("Conectando ao WebSocket (timeout de 3s)...")
-        ws = create_connection(ws_url, header=ws_headers, timeout=3)
+        print("Conectando ao WebSocket...")
+        ws = create_connection(ws_url, header=ws_headers, timeout=5)
         ws.settimeout(3)
         
-        print("Lendo dados...")
-        msg = ws.recv()
-        if msg:
-            data = json.loads(msg)
-            if isinstance(data, dict):
-                raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-                for r in raids_list:
-                    raids_data[r["idx"]] = r
+        print("Lendo pacotes do servidor...")
+        # Lê até 10 mensagens seguidas para capturar o pacote correto de raids
+        for i in range(10):
+            try:
+                msg = ws.recv()
+                if msg:
+                    data = json.loads(msg)
+                    if isinstance(data, dict):
+                        raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
+                        if raids_list:
+                            for r in raids_list:
+                                raids_data[r["idx"]] = r
+                            print(f"Dados capturados na mensagem {i+1}!")
+                            break
+            except Exception:
+                continue
+                
     except Exception as e:
-        print(f"Aviso na leitura: {e}")
+        print(f"Aviso na conexão: {e}")
     finally:
         if ws:
             try:
