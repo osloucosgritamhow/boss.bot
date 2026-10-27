@@ -1,12 +1,18 @@
 import json
+import socket
+import sys
 import requests
 from websocket import create_connection
+
+# Timeout global rígido: nenhum socket pode travar por mais de 3 segundos
+socket.setdefaulttimeout(3)
+sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
 ROLE_TAG = "@Bosses"
 
 def main():
-    print("Iniciando execução...")
+    print("Iniciando execução com timeout global...")
     raids_data = {}
     
     ws_url = "wss://ws.raids.l2stuff.xyz/"
@@ -18,28 +24,19 @@ def main():
     ws = None
     try:
         print("Conectando ao WebSocket...")
-        ws = create_connection(ws_url, header=ws_headers, timeout=5)
+        ws = create_connection(ws_url, header=ws_headers, timeout=3)
         ws.settimeout(3)
         
-        print("Lendo pacotes do servidor...")
-        # Lê até 10 mensagens seguidas para capturar o pacote correto de raids
-        for i in range(10):
-            try:
-                msg = ws.recv()
-                if msg:
-                    data = json.loads(msg)
-                    if isinstance(data, dict):
-                        raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
-                        if raids_list:
-                            for r in raids_list:
-                                raids_data[r["idx"]] = r
-                            print(f"Dados capturados na mensagem {i+1}!")
-                            break
-            except Exception:
-                continue
-                
+        print("Lendo dados do servidor...")
+        msg = ws.recv()
+        if msg:
+            data = json.loads(msg)
+            if isinstance(data, dict):
+                raids_list = data.get("data", {}).get("raids", []) or data.get("raids", [])
+                for r in raids_list:
+                    raids_data[r["idx"]] = r
     except Exception as e:
-        print(f"Aviso na conexão: {e}")
+        print(f"Aviso ou timeout na conexão: {e}")
     finally:
         if ws:
             try:
@@ -48,7 +45,7 @@ def main():
                 pass
 
     if not raids_data:
-        print("Nenhum dado capturado nesta execução.")
+        print("Nenhum dado capturado nesta execução. Encerrando com segurança.")
         return
 
     print(f"Processando {len(raids_data)} raids...")
@@ -81,7 +78,7 @@ def main():
         "allowed_mentions": {"parse": ["roles"]}
     }
 
-    print("Enviando para o Discord...")
+    print("Enviando dados para o Discord...")
     res = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print(f"Status do envio para o Discord: {res.status_code}")
 
