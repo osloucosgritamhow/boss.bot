@@ -12,7 +12,7 @@ socket.setdefaulttimeout(4)
 sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
-ROLE_TAG = "@Bosses"
+ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
 def load_state():
@@ -51,7 +51,6 @@ def parse_time_and_countdown(ts, raw_cd=None):
             else:
                 val_sec = val
             
-            # Converte o timestamp UTC do site para o Horário de Brasília
             target_dt = datetime.fromtimestamp(val_sec, tz=ZoneInfo("UTC")).astimezone(tz)
             now_dt = datetime.now(tz)
             
@@ -213,8 +212,8 @@ def main():
 
         payload_individual = {
             "content": f"{ROLE_TAG} **Atualização de Boss:** `{name}`",
-            "embeds": [embed],
-            "allowed_mentions": {"parse": ["roles"]}
+            "allowed_mentions": {"parse": ["roles"]},
+            "embeds": [embed]
         }
 
         print(f"Enviando notificação individual para: {name}")
