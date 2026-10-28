@@ -205,7 +205,7 @@ def main():
         # 1. ALERTA DE 10 MINUTOS (janela estrita entre 500s e 600s)
         if 500 <= diff_secs <= 600:
             embed_10m = {
-                "title": f"⏳ BOSS: {name.upper()} ({tm_formatted}) - 10 MINUTOS",
+                "title": f"⏳ BOSS: {name.upper()} - 10 MINUTOS",
                 "description": f"**Horário de Spawn:** `{tm_formatted}`",
                 "color": 16763904,
                 "footer": {"text": "AOG • RAID ALERT SYSTEM"}
@@ -222,7 +222,7 @@ def main():
         # 2. ALERTA DE 5 MINUTOS (janela estrita entre 200s e 300s)
         elif 200 <= diff_secs <= 300:
             embed_5m = {
-                "title": f"🚨 BOSS: {name.upper()} ({tm_formatted}) - 5 MINUTOS",
+                "title": f"🚨 BOSS: {name.upper()} - 5 MINUTOS",
                 "description": f"**Horário de Spawn:** `{tm_formatted}`",
                 "color": 15158332,
                 "footer": {"text": "AOG • RAID ALERT SYSTEM"}
