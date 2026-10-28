@@ -61,16 +61,16 @@ def parse_time_and_countdown(ts, raw_cd=None):
                 total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
                 is_passed = False
             else:
-                diff_seconds = abs(diff_seconds)
-                hours = diff_seconds // 3600
-                minutes = (diff_seconds % 3600) // 60
-                seconds = diff_seconds % 60
+                diff_sec_abs = abs(diff_seconds)
+                hours = diff_sec_abs // 3600
+                minutes = (diff_sec_abs % 3600) // 60
+                seconds = diff_sec_abs % 60
                 cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                 cd_text = f"Já nasceu há {cd_time}"
                 total_mins = -(hours * 60 + minutes + (1 if seconds > 0 else 0))
                 is_passed = True
             
-            return cd_text, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec
+            return cd_text, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec, diff_seconds
     except:
         pass
     
@@ -78,11 +78,11 @@ def parse_time_and_countdown(ts, raw_cd=None):
         is_passed = "T+" in raw_cd
         clean = raw_cd.replace("T-", "").replace("T+", "").strip()
         if is_passed:
-            return f"Já nasceu há {clean}", "Horário sob consulta", -999, True, 0
+            return f"Já nasceu há {clean}", "Horário sob consulta", -999, True, 0, -9999
         else:
-            return f"Nasce em {clean}", "Horário sob consulta", 999, False, 0
+            return f"Nasce em {clean}", "Horário sob consulta", 999, False, 0, 9999
 
-    return "Nasce em N/A", "Horário sob consulta", 999999, False, 0
+    return "Nasce em N/A", "Horário sob consulta", 999999, False, 0, 99999
 
 def get_fixed_bosses_list():
     tz = ZoneInfo("America/Sao_Paulo")
@@ -113,13 +113,14 @@ def get_fixed_bosses_list():
                 "tm": target_dt.strftime("%d/%m/%Y %H:%M"),
                 "mins": total_mins,
                 "passed": False,
-                "timestamp": target_dt.timestamp()
+                "timestamp": target_dt.timestamp(),
+                "diff_secs": diff_seconds
             })
             
     return fixed_list
 
 def main():
-    print(f"[{datetime.now()}] Iniciando varredura híbrida com layout tático...")
+    print(f"[{datetime.now()}] Varredura de alta precisão iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -177,7 +178,7 @@ def main():
         raw_cd = r.get("_countdown", r.get("countdown"))
         raw_tm = r.get("_time", r.get("time", r.get("respawn_time")))
         
-        cd_text, tm_formatted, total_mins, is_passed, timestamp_sec = parse_time_and_countdown(raw_tm, raw_cd)
+        cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm, raw_cd)
         
         if name not in unique_bosses:
             unique_bosses[name] = {
@@ -187,7 +188,8 @@ def main():
                 "tm": tm_formatted,
                 "mins": total_mins,
                 "passed": is_passed,
-                "timestamp": timestamp_sec
+                "timestamp": timestamp_sec,
+                "diff_secs": diff_seconds
             }
         else:
             existing = unique_bosses[name]
@@ -199,7 +201,8 @@ def main():
                     "tm": tm_formatted,
                     "mins": total_mins,
                     "passed": is_passed,
-                    "timestamp": timestamp_sec
+                    "timestamp": timestamp_sec,
+                    "diff_secs": diff_seconds
                 }
 
     bosses_clean = list(unique_bosses.values())
@@ -214,30 +217,31 @@ def main():
     state = load_state()
     state_updated = False
 
-    # 1. Alertas Críticos de 5 minutos
+    # Alerta de 5 minutos exato baseado em segundos restantes (0 a 300 segundos)
     for r in bosses_clean:
         name = r["name"]
-        mins = r["mins"]
+        diff_secs = r["diff_secs"]
         tm_formatted = r["tm"]
         passed = r["passed"]
 
-        if 0 <= mins <= 5 and not passed:
-            alert_key = f"5min_{tm_formatted}"
+        # Se faltar entre 0 e 300 segundos (5 minutos) exatos para o nascimento
+        if 0 <= diff_secs <= 300 and not passed:
+            alert_key = f"alert_5min_{tm_formatted}"
             if state.get(name) == alert_key:
                 continue
             
             embed_urgent = {
                 "title": "🚨 AOG | ALERTA DE JANELA DE BOSS",
-                "description": f"Uma janela de Raid Boss está se aproximando. Fique atento!\n\n🎯 **Boss:** `{name.upper()}`\n⏳ **Status:** Janela crítica iminente (menos de 5 min)\n📅 **Nascimento Estimado:** `{tm_formatted}`",
+                "description": f"O boss vai nascer em breve!\n\n🎯 **Boss:** `{name.upper()}`\n⏳ **Previsão exata:** `{tm_formatted}`",
                 "color": 15158332,
                 "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
             }
             payload_urgent = {
-                "content": f"{ROLE_TAG} **Atenção clã! O boss {name} vai nascer em 5 minutos!**",
+                "content": f"{ROLE_TAG} **Atenção clã! O boss {name} nasce exatamente às {tm_formatted} (Faltam 5 minutos)!**",
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_urgent]
             }
-            print(f"Enviando alerta urgente de 5 min para: {name}")
+            print(f"Disparando alerta de 5 min para {name} com nascimento às {tm_formatted}")
             requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
             
             state[name] = alert_key
@@ -246,7 +250,7 @@ def main():
     if state_updated:
         save_state(state)
 
-    # 2. Painel Consolidado com Layout Tático Organizado
+    # Painel Consolidado de Status
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
@@ -258,7 +262,7 @@ def main():
 
     embed_dashboard = {
         "title": "⚔️ AOG | RAID BOSS ALERT",
-        "description": "Janelas de respawn ativas monitoradas no servidor Chronos. Fique atento às movimentações!",
+        "description": "Painel de controle atualizado do servidor Chronos.",
         "color": 3447003,
         "fields": fields,
         "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
