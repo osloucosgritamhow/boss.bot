@@ -120,7 +120,7 @@ def get_fixed_bosses_list():
     return fixed_list
 
 def main():
-    print(f"[{datetime.now()}] Varredura de alta precisão iniciada...")
+    print(f"[{datetime.now()}] Varredura com filtro anti-propaganda iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -152,6 +152,11 @@ def main():
     if raw_data:
         def extract_raids(obj):
             if isinstance(obj, dict):
+                # FILTRO: Ignora se o objeto contiver lixo de propaganda ou links do Telegram
+                obj_str = str(obj).lower()
+                if "t.me" in obj_str or "a-tools" in obj_str:
+                    return
+                
                 if ("name" in obj or "title" in obj) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
                     raids_list.append(obj)
                 for v in obj.values():
@@ -169,7 +174,7 @@ def main():
     unique_bosses = {}
     for r in chronos_bosses:
         name = r.get("name", r.get("title"))
-        if not name:
+        if not name or any(bad in str(name).lower() for bad in ["t.me", "telegram", "tools"]):
             continue
         
         if any(f["name"].lower() in name.lower() for f in FIXED_BOSSES):
@@ -217,14 +222,13 @@ def main():
     state = load_state()
     state_updated = False
 
-    # Alerta de 5 minutos exato baseado em segundos restantes (0 a 300 segundos)
+    # Alerta de 5 minutos exato (0 a 300 segundos)
     for r in bosses_clean:
         name = r["name"]
         diff_secs = r["diff_secs"]
         tm_formatted = r["tm"]
         passed = r["passed"]
 
-        # Se faltar entre 0 e 300 segundos (5 minutos) exatos para o nascimento
         if 0 <= diff_secs <= 300 and not passed:
             alert_key = f"alert_5min_{tm_formatted}"
             if state.get(name) == alert_key:
@@ -250,7 +254,7 @@ def main():
     if state_updated:
         save_state(state)
 
-    # Painel Consolidado de Status
+    # Painel Consolidado de Status (com flags para evitar embeds automáticos de links externos)
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
@@ -271,10 +275,11 @@ def main():
     payload_dashboard = {
         "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
         "allowed_mentions": {"parse": ["roles"]},
-        "embeds": [embed_dashboard]
+        "embeds": [embed_dashboard],
+        "flags": 4  # SUPPRESS_EMBEDS: Bloqueia qualquer link externo indesejado de gerar pré-visualização
     }
 
-    print("Enviando painel tático consolidado...")
+    print("Enviando painel tático limpo...")
     requests.post(WEBHOOK_URL, json=payload_dashboard, timeout=5)
 
 if __name__ == "__main__":
