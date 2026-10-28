@@ -192,6 +192,7 @@ def main():
         return
 
     alerts_sent_count = 0
+    sent_this_run = set()  # 🛡️ Barreira de segurança para evitar duplicatas no mesmo ciclo
 
     for r in bosses_clean:
         name = r["name"]
@@ -204,6 +205,12 @@ def main():
 
         # 1. ALERTA DE 10 MINUTOS (janela estrita entre 500s e 600s)
         if 500 <= diff_secs <= 600:
+            alert_id = f"10m_{name}_{tm_formatted}"
+            if alert_id in sent_this_run:
+                continue # Pula se já foi enviado nesta mesma execução
+            
+            sent_this_run.add(alert_id)
+
             embed_10m = {
                 "title": f"⏳ BOSS: {name.upper()} - 10 MINUTOS",
                 "description": f"**Horário de Spawn:** `{tm_formatted}`",
@@ -221,6 +228,12 @@ def main():
 
         # 2. ALERTA DE 5 MINUTOS (janela estrita entre 200s e 300s)
         elif 200 <= diff_secs <= 300:
+            alert_id = f"5m_{name}_{tm_formatted}"
+            if alert_id in sent_this_run:
+                continue # Pula se já foi enviado nesta mesma execução
+            
+            sent_this_run.add(alert_id)
+
             embed_5m = {
                 "title": f"🚨 BOSS: {name.upper()} - 5 MINUTOS",
                 "description": f"**Horário de Spawn:** `{tm_formatted}`",
