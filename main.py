@@ -12,30 +12,12 @@ sys.stdout.reconfigure(line_buffering=True)
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1564794001704615966/95X7TnqSNCxFv_2hPEehIQV4BV_WxoZKvCKVMlusjf9NnJu1oKQGtmrr4t7hNaCOfd5a"
 ROLE_TAG = "<@&1285763435107319829>"
-STATE_FILE = "sent_alerts.json"
 
-# Cronograma fixo categorizado
 FIXED_BOSSES = [
     {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
     {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
     {"name": "Chaos Golem", "category": "GOLEM RAIDS", "times": [dtime(11, 0), dtime(15, 0)]},
 ]
-
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
-
-def save_state(state):
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f)
-    except:
-        pass
 
 def parse_time_and_countdown(ts, raw_cd=None):
     tz = ZoneInfo("America/Sao_Paulo")
@@ -111,13 +93,13 @@ def get_fixed_bosses_list():
 def safe_discord_post(payload):
     payload_str = str(payload).lower()
     if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
-        print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada!")
+        print("⚠️ Propaganda detectada e bloqueada!")
         return
     resp = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print(f"Discord Response Status: {resp.status_code}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura silenciosa iniciada (com alerta de boss ativo)...")
+    print(f"[{datetime.now()}] Varredura de pré-nascimento iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -206,8 +188,6 @@ def main():
         print("Nenhum boss monitorado neste ciclo.")
         return
 
-    state = load_state()
-    state_updated = False
     alerts_sent_count = 0
 
     for r in bosses_clean:
@@ -216,76 +196,45 @@ def main():
         tm_formatted = r["tm"]
         passed = r["passed"]
 
-        # 1. ALERTA DE 10 MINUTOS (faixa de 301s até 600s antes do spawn)
-        if 301 <= diff_secs <= 600 and not passed:
-            alert_key_10m = f"alert_10min_{tm_formatted}"
-            if state.get(f"{name}_10m") != alert_key_10m:
-                embed_10m = {
-                    "title": "⏳ AOG | PRÉ-ALERTA DE RAID BOSS (10 MINUTOS)",
-                    "description": f"Preparem os PTs e suplementos!\n\n🎯 **Boss:** `{name.upper()}`\n📅 **Nascimento Previsto:** `{tm_formatted}`\n⏱️ **Tempo Restante:** ~10 minutos",
-                    "color": 16763904,
-                    "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
-                }
-                payload_10m = {
-                    "content": f"{ROLE_TAG} 📢 **Atenção clã! O boss {name} vai nascer em 10 minutos (às {tm_formatted})! Organizem os grupos!**",
-                    "allowed_mentions": {"parse": ["roles"]},
-                    "embeds": [embed_10m]
-                }
-                print(f"📢 Disparando pré-alerta de 10 min para {name}")
-                safe_discord_post(payload_10m)
-                
-                state[f"{name}_10m"] = alert_key_10m
-                state_updated = True
-                alerts_sent_count += 1
+        # Se já passou do horário, ignora completamente
+        if passed:
+            continue
 
-        # 2. ALERTA DE 5 MINUTOS (faixa de 0s até 300s antes do spawn)
-        elif 0 <= diff_secs <= 300 and not passed:
-            alert_key_5m = f"alert_5min_{tm_formatted}"
-            if state.get(f"{name}_5m") != alert_key_5m:
-                embed_5m = {
-                    "title": "🚨 AOG | ALERTA URGENTE - RUSH DE BOSS (5 MINUTOS)",
-                    "description": f"Janela iminente! Movem para o spot imediatamente!\n\n🎯 **Boss:** `{name.upper()}`\n⚡ **Nascimento Exato:** `{tm_formatted}`\n⏱️ **Tempo Restante:** ~5 minutos",
-                    "color": 15158332,
-                    "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
-                }
-                payload_5m = {
-                    "content": f"{ROLE_TAG} 🚨 **URGENTE: O boss {name} nasce em 5 minutos (às {tm_formatted})! Todos no Spot!**",
-                    "allowed_mentions": {"parse": ["roles"]},
-                    "embeds": [embed_5m]
-                }
-                print(f"🚨 Disparando alerta urgente de 5 min para {name}")
-                safe_discord_post(payload_5m)
-                
-                state[f"{name}_5m"] = alert_key_5m
-                state_updated = True
-                alerts_sent_count += 1
+        # 1. ALERTA DE 10 MINUTOS (janela estrita entre 500s e 600s)
+        if 500 <= diff_secs <= 600:
+            embed_10m = {
+                "title": f"⏳ BOSS: {name.upper()} - 10 MINUTOS",
+                "description": f"**Horário:** `{tm_formatted}`",
+                "color": 16763904,
+                "footer": {"text": "AOG • RAID ALERT SYSTEM"}
+            }
+            payload_10m = {
+                "content": f"{ROLE_TAG} **{name}** nasce em 10 minutos ({tm_formatted}).",
+                "allowed_mentions": {"parse": ["roles"]},
+                "embeds": [embed_10m]
+            }
+            print(f"Disparando 10m para {name}")
+            safe_discord_post(payload_10m)
+            alerts_sent_count += 1
 
-        # 3. ALERTA DE BOSS PENDENTE / ATIVO (passou do horário, entre 0 e -1800 segundos / até 30 min depois)
-        elif passed and -1800 <= diff_secs < 0:
-            alert_key_active = f"alert_active_{tm_formatted}"
-            if state.get(f"{name}_active") != alert_key_active:
-                embed_active = {
-                    "title": "⚠️ AOG | BOSS PENDENTE / ATIVO NO SPOT",
-                    "description": f"O horário passou e o boss consta como não abatido!\n\n🎯 **Boss:** `{name.upper()}`\n📅 **Previsão Era:** `{tm_formatted}`\n🔍 **Status:** `Aguardando limpeza no spot (Pode estar vivo!)`",
-                    "color": 10181046, # Tom roxo/alaranjado de atenção
-                    "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
-                }
-                payload_active = {
-                    "content": f"{ROLE_TAG} ⚠️ **Atenção clã! O boss {name} (previsto para {tm_formatted}) passou da janela e pode estar vivo no spot. Mandem olheiros para conferir!**",
-                    "allowed_mentions": {"parse": ["roles"]},
-                    "embeds": [embed_active]
-                }
-                print(f"⚠️ Disparando alerta de boss ativo/pendente para {name}")
-                safe_discord_post(payload_active)
-                
-                state[f"{name}_active"] = alert_key_active
-                state_updated = True
-                alerts_sent_count += 1
+        # 2. ALERTA DE 5 MINUTOS (janela estrita entre 200s e 300s)
+        elif 200 <= diff_secs <= 300:
+            embed_5m = {
+                "title": f"🚨 BOSS: {name.upper()} - 5 MINUTOS",
+                "description": f"**Horário:** `{tm_formatted}`",
+                "color": 15158332,
+                "footer": {"text": "AOG • RAID ALERT SYSTEM"}
+            }
+            payload_5m = {
+                "content": f"{ROLE_TAG} **{name}** nasce em 5 minutos ({tm_formatted}).",
+                "allowed_mentions": {"parse": ["roles"]},
+                "embeds": [embed_5m]
+            }
+            print(f"Disparando 5m para {name}")
+            safe_discord_post(payload_5m)
+            alerts_sent_count += 1
 
-    if state_updated:
-        save_state(state)
-
-    print(f"Varredura concluída. Alertas disparados neste ciclo: {alerts_sent_count}")
+    print(f"Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 if __name__ == "__main__":
     main()
