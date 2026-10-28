@@ -120,7 +120,6 @@ def get_fixed_bosses_list():
     return fixed_list
 
 def safe_discord_post(payload):
-    """Barra absolutamente qualquer tentativa de enviar spam/propaganda externa"""
     payload_str = str(payload).lower()
     if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
         print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada!")
@@ -128,7 +127,7 @@ def safe_discord_post(payload):
     requests.post(WEBHOOK_URL, json=payload, timeout=5)
 
 def main():
-    print(f"[{datetime.now()}] Varredura com novo webhook iniciada...")
+    print(f"[{datetime.now()}] Varredura limpa iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -257,7 +256,7 @@ def main():
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_urgent]
             }
-            print(f"Disparando alerta de 5 min para {name} com nascimento às {tm_formatted}")
+            print(f"Disparando alerta de 5 min para {name}")
             safe_discord_post(payload_urgent)
             
             state[name] = alert_key
@@ -266,7 +265,7 @@ def main():
     if state_updated:
         save_state(state)
 
-    # Painel Consolidado de Status
+    # Painel Consolidado de Status (Simplificado sem duplicações)
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
@@ -278,20 +277,20 @@ def main():
 
     embed_dashboard = {
         "title": "⚔️ AOG | RAID BOSS ALERT",
-        "description": "Painel de controle atualizado do servidor Chronos.",
+        "description": "Janelas de respawn ativas monitoradas no servidor Chronos. Fique atento às movimentações!",
         "color": 3447003,
         "fields": fields,
         "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
     }
 
     payload_dashboard = {
-        "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
+        "content": f"{ROLE_TAG} **Painel de Raids Atualizado:**",
         "allowed_mentions": {"parse": ["roles"]},
         "embeds": [embed_dashboard],
         "flags": 4
     }
 
-    print("Enviando painel tático para o novo webhook...")
+    print("Enviando painel tático...")
     safe_discord_post(payload_dashboard)
 
 if __name__ == "__main__":
