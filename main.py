@@ -14,7 +14,7 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1564794001704615966/95X7TnqSNCxF
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
-# Cronograma fixo categorizado e blindado
+# Cronograma fixo categorizado e blindado (Garante que sempre haverá dados)
 FIXED_BOSSES = [
     {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
     {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
@@ -124,10 +124,13 @@ def safe_discord_post(payload):
     if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
         print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada!")
         return
-    requests.post(WEBHOOK_URL, json=payload, timeout=5)
+    resp = requests.post(WEBHOOK_URL, json=payload, timeout=5)
+    print(f"Discord Response Status: {resp.status_code}")
+    if resp.status_code not in [200, 204]:
+        print(f"Erro Discord Response: {resp.text}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura limpa iniciada...")
+    print(f"[{datetime.now()}] Varredura iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -207,33 +210,21 @@ def main():
                 "timestamp": timestamp_sec,
                 "diff_secs": diff_seconds
             }
-        else:
-            existing = unique_bosses[name_str]
-            if timestamp_sec > 0 and (existing["timestamp"] == 0 or timestamp_sec < existing["timestamp"]):
-                unique_bosses[name_str] = {
-                    "name": name_str,
-                    "category": "FIELD RAIDS",
-                    "cd": cd_text,
-                    "tm": tm_formatted,
-                    "mins": total_mins,
-                    "passed": is_passed,
-                    "timestamp": timestamp_sec,
-                    "diff_secs": diff_seconds
-                }
 
     bosses_clean = list(unique_bosses.values())
     fixed_clean = get_fixed_bosses_list()
     bosses_clean.extend(fixed_clean)
     bosses_clean.sort(key=lambda x: abs(x["mins"]) if x["mins"] != 999999 else 999999)
 
+    print(f"Total de bosses processados para exibição: {len(bosses_clean)}")
+
     if not bosses_clean:
-        print("Nenhum boss processado neste ciclo.")
+        print("Nenhum boss para exibir.")
         return
 
+    # Alerta de 5 minutos exato (0 a 300 segundos)
     state = load_state()
     state_updated = False
-
-    # Alerta de 5 minutos exato (0 a 300 segundos)
     for r in bosses_clean:
         name = r["name"]
         diff_secs = r["diff_secs"]
@@ -265,7 +256,7 @@ def main():
     if state_updated:
         save_state(state)
 
-    # Painel Consolidado de Status (Simplificado sem duplicações)
+    # Montagem do Painel Tático Consolidado
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
@@ -290,7 +281,7 @@ def main():
         "flags": 4
     }
 
-    print("Enviando painel tático...")
+    print("Enviando painel tático consolidado...")
     safe_discord_post(payload_dashboard)
 
 if __name__ == "__main__":
