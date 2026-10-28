@@ -94,13 +94,13 @@ def get_fixed_bosses_list():
 def safe_discord_post(payload):
     payload_str = str(payload).lower()
     if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
-        print("⚠️ Propaganda detectada e bloqueada!")
+        print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada!")
         return
     resp = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print(f"Discord Response Status: {resp.status_code}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura de pré-nascimento iniciada...")
+    print(f"[{datetime.now()}] Varredura com filtro rigoroso de unicidade iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -151,6 +151,8 @@ def main():
     if not chronos_bosses and raids_list:
         chronos_bosses = raids_list
 
+    # 🛡️ FILTRAGEM RIGOROSA POR NOME: Cada boss só pode existir 1 única vez na lista.
+    # Se a API mandar duplicado com horários diferentes, mantemos o que está mais próximo de nascer (menor diff_secs positivo).
     unique_bosses = {}
     for r in chronos_bosses:
         name = r.get("name", r.get("title"))
@@ -169,10 +171,29 @@ def main():
         
         cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm, raw_cd)
         
-        unique_key = f"{name_str}_{tm_formatted}"
+        # Ignora bosses que já passaram do horário nesta etapa de varredura
+        if is_passed:
+            continue
+
+        boss_key = name_str.lower()
         
-        if unique_key not in unique_bosses:
-            unique_bosses[unique_key] = {
+        # Se o boss já foi inserido, comparamos para manter apenas o registro com o spawn mais lógico/próximo
+        if boss_key in unique_bosses:
+            existing_diff = unique_bosses[boss_key]["diff_secs"]
+            # Se o novo diff for menor e positivo, ele é a projeção mais recente/correta
+            if 0 <= diff_seconds < existing_diff:
+                unique_bosses[boss_key] = {
+                    "name": name_str,
+                    "category": "FIELD RAIDS",
+                    "cd": cd_text,
+                    "tm": tm_formatted,
+                    "mins": total_mins,
+                    "passed": is_passed,
+                    "timestamp": timestamp_sec,
+                    "diff_secs": diff_seconds
+                }
+        else:
+            unique_bosses[boss_key] = {
                 "name": name_str,
                 "category": "FIELD RAIDS",
                 "cd": cd_text,
@@ -185,29 +206,30 @@ def main():
 
     bosses_clean = list(unique_bosses.values())
     fixed_clean = get_fixed_bosses_list()
-    bosses_clean.extend(fixed_clean)
+    
+    # Adiciona os fixos garantindo que não duplique por nome
+    existing_names = {b["name"].lower() for b in bosses_clean}
+    for fc in fixed_clean:
+        if fc["name"].lower() not in existing_names and not fc["passed"]:
+            bosses_clean.append(fc)
 
     if not bosses_clean:
         print("Nenhum boss monitorado neste ciclo.")
         return
 
     alerts_sent_count = 0
-    sent_this_run = set()  # 🛡️ Barreira de segurança para evitar duplicatas no mesmo ciclo
+    sent_this_run = set()
 
     for r in bosses_clean:
         name = r["name"]
         diff_secs = r["diff_secs"]
         tm_formatted = r["tm"]
-        passed = r["passed"]
-
-        if passed:
-            continue
 
         # 1. ALERTA DE 10 MINUTOS (janela estrita entre 500s e 600s)
         if 500 <= diff_secs <= 600:
-            alert_id = f"10m_{name}_{tm_formatted}"
+            alert_id = f"10m_{name.lower()}_{tm_formatted}"
             if alert_id in sent_this_run:
-                continue # Pula se já foi enviado nesta mesma execução
+                continue
             
             sent_this_run.add(alert_id)
 
@@ -228,9 +250,9 @@ def main():
 
         # 2. ALERTA DE 5 MINUTOS (janela estrita entre 200s e 300s)
         elif 200 <= diff_secs <= 300:
-            alert_id = f"5m_{name}_{tm_formatted}"
+            alert_id = f"5m_{name.lower()}_{tm_formatted}"
             if alert_id in sent_this_run:
-                continue # Pula se já foi enviado nesta mesma execução
+                continue
             
             sent_this_run.add(alert_id)
 
