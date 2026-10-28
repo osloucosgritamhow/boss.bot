@@ -37,26 +37,6 @@ def save_state(state):
     except:
         pass
 
-def is_valid_boss_name(name):
-    if not name or not isinstance(name, str):
-        return False
-    name_clean = name.strip()
-    name_lower = name_clean.lower()
-    
-    # Barreiras rígidas contra qualquer propaganda ou texto injetado
-    blacklist = ["t.me", "telegram", "http", "www", "channel", "premium", "join", "bot", "tools", "dm at", "@", "profit", "tucos"]
-    if any(b in name_lower for b in blacklist):
-        return False
-    
-    # Nomes de boss reais são curtos e não possuem frases longas ou caracteres inválidos
-    if len(name_clean) > 35 or len(name_clean) < 3:
-        return False
-    
-    if "/" in name_clean or "." in name_clean or "?" in name_clean or "!" in name_clean:
-        return False
-        
-    return True
-
 def parse_time_and_countdown(ts, raw_cd=None):
     tz = ZoneInfo("America/Sao_Paulo")
     try:
@@ -139,8 +119,16 @@ def get_fixed_bosses_list():
             
     return fixed_list
 
+def safe_discord_post(payload):
+    """Barra absolutamente qualquer tentativa de enviar spam/propaganda do Telegram para o Discord"""
+    payload_str = str(payload).lower()
+    if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str:
+        print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada antes do envio!")
+        return
+    requests.post(WEBHOOK_URL, json=payload, timeout=5)
+
 def main():
-    print(f"[{datetime.now()}] Varredura com filtro estricto de nomes iniciada...")
+    print(f"[{datetime.now()}] Varredura com Safety Check final iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -172,9 +160,12 @@ def main():
     if raw_data:
         def extract_raids(obj):
             if isinstance(obj, dict):
-                # Extrai apenas se tiver estrutura de boss válida
+                obj_str = str(obj).lower()
+                if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
+                    return
+                
                 name = obj.get("name", obj.get("title"))
-                if name and is_valid_boss_name(name) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
+                if name and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
                     raids_list.append(obj)
                 for v in obj.values():
                     extract_raids(v)
@@ -191,10 +182,14 @@ def main():
     unique_bosses = {}
     for r in chronos_bosses:
         name = r.get("name", r.get("title"))
-        if not is_valid_boss_name(name):
+        if not name:
             continue
         
-        if any(f["name"].lower() in name.lower() for f in FIXED_BOSSES):
+        name_str = str(name).strip()
+        if any(bad in name_str.lower() for bad in ["t.me", "telegram", "http", "profit"]):
+            continue
+        
+        if any(f["name"].lower() in name_str.lower() for f in FIXED_BOSSES):
             continue
         
         raw_cd = r.get("_countdown", r.get("countdown"))
@@ -202,9 +197,9 @@ def main():
         
         cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm, raw_cd)
         
-        if name not in unique_bosses:
-            unique_bosses[name] = {
-                "name": name,
+        if name_str not in unique_bosses:
+            unique_bosses[name_str] = {
+                "name": name_str,
                 "category": "FIELD RAIDS",
                 "cd": cd_text,
                 "tm": tm_formatted,
@@ -214,10 +209,10 @@ def main():
                 "diff_secs": diff_seconds
             }
         else:
-            existing = unique_bosses[name]
+            existing = unique_bosses[name_str]
             if timestamp_sec > 0 and (existing["timestamp"] == 0 or timestamp_sec < existing["timestamp"]):
-                unique_bosses[name] = {
-                    "name": name,
+                unique_bosses[name_str] = {
+                    "name": name_str,
                     "category": "FIELD RAIDS",
                     "cd": cd_text,
                     "tm": tm_formatted,
@@ -263,7 +258,7 @@ def main():
                 "embeds": [embed_urgent]
             }
             print(f"Disparando alerta de 5 min para {name} com nascimento às {tm_formatted}")
-            requests.post(WEBHOOK_URL, json=payload_urgent, timeout=5)
+            safe_discord_post(payload_urgent)
             
             state[name] = alert_key
             state_updated = True
@@ -293,11 +288,11 @@ def main():
         "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
         "allowed_mentions": {"parse": ["roles"]},
         "embeds": [embed_dashboard],
-        "flags": 4  # SUPPRESS_EMBEDS: Bloqueia qualquer link externo
+        "flags": 4  # SUPPRESS_EMBEDS
     }
 
-    print("Enviando painel tático limpo...")
-    requests.post(WEBHOOK_URL, json=payload_dashboard, timeout=5)
+    print("Enviando painel tático com verificação de segurança...")
+    safe_discord_post(payload_dashboard)
 
 if __name__ == "__main__":
     main()
