@@ -14,7 +14,7 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1564794001704615966/95X7TnqSNCxF
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
-# Cronograma fixo categorizado e blindado (Garante que sempre haverá dados)
+# Cronograma fixo categorizado e blindado
 FIXED_BOSSES = [
     {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
     {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
@@ -126,11 +126,9 @@ def safe_discord_post(payload):
         return
     resp = requests.post(WEBHOOK_URL, json=payload, timeout=5)
     print(f"Discord Response Status: {resp.status_code}")
-    if resp.status_code not in [200, 204]:
-        print(f"Erro Discord Response: {resp.text}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura iniciada...")
+    print(f"[{datetime.now()}] Varredura silenciosa iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -214,23 +212,23 @@ def main():
     bosses_clean = list(unique_bosses.values())
     fixed_clean = get_fixed_bosses_list()
     bosses_clean.extend(fixed_clean)
-    bosses_clean.sort(key=lambda x: abs(x["mins"]) if x["mins"] != 999999 else 999999)
-
-    print(f"Total de bosses processados para exibição: {len(bosses_clean)}")
 
     if not bosses_clean:
-        print("Nenhum boss para exibir.")
+        print("Nenhum boss monitorado neste ciclo.")
         return
 
-    # Alerta de 5 minutos exato (0 a 300 segundos)
+    # Verificação estricta de alerta de 5 minutos (0 a 300 segundos)
     state = load_state()
     state_updated = False
+    alerts_sent_count = 0
+
     for r in bosses_clean:
         name = r["name"]
         diff_secs = r["diff_secs"]
         tm_formatted = r["tm"]
         passed = r["passed"]
 
+        # Dispara APENAS se faltar entre 0 e 5 minutos e o boss ainda não tiver nascido/sido alertado
         if 0 <= diff_secs <= 300 and not passed:
             alert_key = f"alert_5min_{tm_formatted}"
             if state.get(name) == alert_key:
@@ -247,41 +245,18 @@ def main():
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_urgent]
             }
-            print(f"Disparando alerta de 5 min para {name}")
+            
+            print(f"🚨 Disparando alerta de 5 min para {name} às {tm_formatted}")
             safe_discord_post(payload_urgent)
             
             state[name] = alert_key
             state_updated = True
+            alerts_sent_count += 1
 
     if state_updated:
         save_state(state)
 
-    # Montagem do Painel Tático Consolidado (Sem SUPPRESS_EMBEDS)
-    fields = []
-    for r in bosses_clean[:6]:
-        icon = "🔴" if r["passed"] else "🟢"
-        fields.append({
-            "name": f"{icon} [{r['category']}] {r['name']}",
-            "value": f"> ⏳ **Tempo até o spawn:** `{r['cd'].replace('Nasce em ', '')}`\n> 📅 **Nascimento Estimado:** `{r['tm']}`",
-            "inline": False
-        })
-
-    embed_dashboard = {
-        "title": "⚔️ AOG | RAID BOSS ALERT",
-        "description": "Janelas de respawn ativas monitoradas no servidor Chronos. Fique atento às movimentações!",
-        "color": 3447003,
-        "fields": fields,
-        "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
-    }
-
-    payload_dashboard = {
-        "content": f"{ROLE_TAG} **Painel de Raids Atualizado:**",
-        "allowed_mentions": {"parse": ["roles"]},
-        "embeds": [embed_dashboard]
-    }
-
-    print("Enviando painel tático consolidado...")
-    safe_discord_post(payload_dashboard)
+    print(f"Varredura concluída em silêncio. Alertas disparados neste ciclo: {alerts_sent_count}")
 
 if __name__ == "__main__":
     main()
