@@ -16,7 +16,8 @@ ROLE_TAG = "<@&1285763435107319829>"
 FIXED_BOSSES = [
     {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
     {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
-    {"name": "Chaos Golem", "category": "GOLEM RAIDS", "times": [dtime(11, 0), dtime(15, 0)]},
+    {"name": "Chaos Golem 17", "category": "GOLEM RAIDS", "times": [dtime(11, 0)]},
+    {"name": "Chaos Golem 18", "category": "GOLEM RAIDS", "times": [dtime(15, 0)]},
 ]
 
 def parse_time_and_countdown(ts, raw_cd=None):
@@ -168,8 +169,10 @@ def main():
         
         cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm, raw_cd)
         
-        if name_str not in unique_bosses:
-            unique_bosses[name_str] = {
+        unique_key = f"{name_str}_{tm_formatted}"
+        
+        if unique_key not in unique_bosses:
+            unique_bosses[unique_key] = {
                 "name": name_str,
                 "category": "FIELD RAIDS",
                 "cd": cd_text,
@@ -196,41 +199,40 @@ def main():
         tm_formatted = r["tm"]
         passed = r["passed"]
 
-        # Se já passou do horário, ignora completamente
         if passed:
             continue
 
         # 1. ALERTA DE 10 MINUTOS (janela estrita entre 500s e 600s)
         if 500 <= diff_secs <= 600:
             embed_10m = {
-                "title": f"⏳ BOSS: {name.upper()} - 10 MINUTOS",
-                "description": f"**Horário:** `{tm_formatted}`",
+                "title": f"⏳ BOSS: {name.upper()} ({tm_formatted}) - 10 MINUTOS",
+                "description": f"**Horário de Spawn:** `{tm_formatted}`",
                 "color": 16763904,
                 "footer": {"text": "AOG • RAID ALERT SYSTEM"}
             }
             payload_10m = {
-                "content": f"{ROLE_TAG} **{name}** nasce em 10 minutos ({tm_formatted}).",
+                "content": f"{ROLE_TAG} **{name}** ({tm_formatted}) nasce em 10 minutos.",
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_10m]
             }
-            print(f"Disparando 10m para {name}")
+            print(f"Disparando 10m para {name} em {tm_formatted}")
             safe_discord_post(payload_10m)
             alerts_sent_count += 1
 
         # 2. ALERTA DE 5 MINUTOS (janela estrita entre 200s e 300s)
         elif 200 <= diff_secs <= 300:
             embed_5m = {
-                "title": f"🚨 BOSS: {name.upper()} - 5 MINUTOS",
-                "description": f"**Horário:** `{tm_formatted}`",
+                "title": f"🚨 BOSS: {name.upper()} ({tm_formatted}) - 5 MINUTOS",
+                "description": f"**Horário de Spawn:** `{tm_formatted}`",
                 "color": 15158332,
                 "footer": {"text": "AOG • RAID ALERT SYSTEM"}
             }
             payload_5m = {
-                "content": f"{ROLE_TAG} **{name}** nasce em 5 minutos ({tm_formatted}).",
+                "content": f"{ROLE_TAG} **{name}** ({tm_formatted}) nasce em 5 minutos.",
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_5m]
             }
-            print(f"Disparando 5m para {name}")
+            print(f"Disparando 5m para {name} em {tm_formatted}")
             safe_discord_post(payload_5m)
             alerts_sent_count += 1
 
