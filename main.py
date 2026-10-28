@@ -272,4 +272,27 @@ def main():
         icon = "🔴" if r["passed"] else "🟢"
         fields.append({
             "name": f"{icon} [{r['category']}] {r['name']}",
-            "value
+            "value": f"> ⏳ **Tempo até o spawn:** `{r['cd'].replace('Nasce em ', '')}`\n> 📅 **Nascimento Estimado:** `{r['tm']}`",
+            "inline": False
+        })
+
+    embed_dashboard = {
+        "title": "⚔️ AOG | RAID BOSS ALERT",
+        "description": "Painel de controle atualizado do servidor Chronos.",
+        "color": 3447003,
+        "fields": fields,
+        "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
+    }
+
+    payload_dashboard = {
+        "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
+        "allowed_mentions": {"parse": ["roles"]},
+        "embeds": [embed_dashboard],
+        "flags": 4
+    }
+
+    print("Enviando painel tático para o novo webhook...")
+    safe_discord_post(payload_dashboard)
+
+if __name__ == "__main__":
+    main()
