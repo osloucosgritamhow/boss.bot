@@ -37,6 +37,26 @@ def save_state(state):
     except:
         pass
 
+def is_valid_boss_name(name):
+    if not name or not isinstance(name, str):
+        return False
+    name_clean = name.strip()
+    name_lower = name_clean.lower()
+    
+    # Barreiras rígidas contra qualquer propaganda ou texto injetado
+    blacklist = ["t.me", "telegram", "http", "www", "channel", "premium", "join", "bot", "tools", "dm at", "@", "profit", "tucos"]
+    if any(b in name_lower for b in blacklist):
+        return False
+    
+    # Nomes de boss reais são curtos e não possuem frases longas ou caracteres inválidos
+    if len(name_clean) > 35 or len(name_clean) < 3:
+        return False
+    
+    if "/" in name_clean or "." in name_clean or "?" in name_clean or "!" in name_clean:
+        return False
+        
+    return True
+
 def parse_time_and_countdown(ts, raw_cd=None):
     tz = ZoneInfo("America/Sao_Paulo")
     try:
@@ -120,7 +140,7 @@ def get_fixed_bosses_list():
     return fixed_list
 
 def main():
-    print(f"[{datetime.now()}] Varredura com filtro anti-propaganda iniciada...")
+    print(f"[{datetime.now()}] Varredura com filtro estricto de nomes iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -152,12 +172,9 @@ def main():
     if raw_data:
         def extract_raids(obj):
             if isinstance(obj, dict):
-                # FILTRO: Ignora se o objeto contiver lixo de propaganda ou links do Telegram
-                obj_str = str(obj).lower()
-                if "t.me" in obj_str or "a-tools" in obj_str:
-                    return
-                
-                if ("name" in obj or "title" in obj) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
+                # Extrai apenas se tiver estrutura de boss válida
+                name = obj.get("name", obj.get("title"))
+                if name and is_valid_boss_name(name) and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
                     raids_list.append(obj)
                 for v in obj.values():
                     extract_raids(v)
@@ -174,7 +191,7 @@ def main():
     unique_bosses = {}
     for r in chronos_bosses:
         name = r.get("name", r.get("title"))
-        if not name or any(bad in str(name).lower() for bad in ["t.me", "telegram", "tools"]):
+        if not is_valid_boss_name(name):
             continue
         
         if any(f["name"].lower() in name.lower() for f in FIXED_BOSSES):
@@ -254,7 +271,7 @@ def main():
     if state_updated:
         save_state(state)
 
-    # Painel Consolidado de Status (com flags para evitar embeds automáticos de links externos)
+    # Painel Consolidado de Status
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
@@ -276,7 +293,7 @@ def main():
         "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
         "allowed_mentions": {"parse": ["roles"]},
         "embeds": [embed_dashboard],
-        "flags": 4  # SUPPRESS_EMBEDS: Bloqueia qualquer link externo indesejado de gerar pré-visualização
+        "flags": 4  # SUPPRESS_EMBEDS: Bloqueia qualquer link externo
     }
 
     print("Enviando painel tático limpo...")
