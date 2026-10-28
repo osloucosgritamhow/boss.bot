@@ -10,7 +10,7 @@ from websocket import create_connection
 socket.setdefaulttimeout(4)
 sys.stdout.reconfigure(line_buffering=True)
 
-WEBHOOK_URL = "https://discord.com/api/webhooks/1563375363760070729/8yyUbn3Z6F8Mb0ALwPN3Mh29gZ0AHbLLjof5Cb9Bnx_8is5UMqnRdZeLJ3Jv7fPy3LGN"
+WEBHOOK_URL = "https://discord.com/api/webhooks/1564794001704615966/95X7TnqSNCxFv_2hPEehIQV4BV_WxoZKvCKVMlusjf9NnJu1oKQGtmrr4t7hNaCOfd5a"
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
@@ -120,15 +120,15 @@ def get_fixed_bosses_list():
     return fixed_list
 
 def safe_discord_post(payload):
-    """Barra absolutamente qualquer tentativa de enviar spam/propaganda do Telegram para o Discord"""
+    """Barra absolutamente qualquer tentativa de enviar spam/propaganda externa"""
     payload_str = str(payload).lower()
-    if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str:
-        print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada antes do envio!")
+    if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
+        print("⚠️ Alerta de segurança: Propaganda detectada e bloqueada!")
         return
     requests.post(WEBHOOK_URL, json=payload, timeout=5)
 
 def main():
-    print(f"[{datetime.now()}] Varredura com Safety Check final iniciada...")
+    print(f"[{datetime.now()}] Varredura com novo webhook iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -272,27 +272,4 @@ def main():
         icon = "🔴" if r["passed"] else "🟢"
         fields.append({
             "name": f"{icon} [{r['category']}] {r['name']}",
-            "value": f"> ⏳ **Tempo até o spawn:** `{r['cd'].replace('Nasce em ', '')}`\n> 📅 **Nascimento Estimado:** `{r['tm']}`",
-            "inline": False
-        })
-
-    embed_dashboard = {
-        "title": "⚔️ AOG | RAID BOSS ALERT",
-        "description": "Painel de controle atualizado do servidor Chronos.",
-        "color": 3447003,
-        "fields": fields,
-        "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
-    }
-
-    payload_dashboard = {
-        "content": f"{ROLE_TAG} **Atualização do Painel de Raids:**",
-        "allowed_mentions": {"parse": ["roles"]},
-        "embeds": [embed_dashboard],
-        "flags": 4  # SUPPRESS_EMBEDS
-    }
-
-    print("Enviando painel tático com verificação de segurança...")
-    safe_discord_post(payload_dashboard)
-
-if __name__ == "__main__":
-    main()
+            "value
