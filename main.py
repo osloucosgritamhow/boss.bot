@@ -14,7 +14,7 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1564794001704615966/95X7TnqSNCxF
 ROLE_TAG = "<@&1285763435107319829>"
 STATE_FILE = "sent_alerts.json"
 
-# Cronograma fixo categorizado e blindado
+# Cronograma fixo categorizado
 FIXED_BOSSES = [
     {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
     {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
@@ -42,10 +42,7 @@ def parse_time_and_countdown(ts, raw_cd=None):
     try:
         if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
             val = int(ts)
-            if val > 10000000000:
-                val_sec = val / 1000
-            else:
-                val_sec = val
+            val_sec = val / 1000 if val > 10000000000 else val
             
             target_dt = datetime.fromtimestamp(val_sec, tz=ZoneInfo("UTC")).astimezone(tz)
             now_dt = datetime.now(tz)
@@ -73,14 +70,6 @@ def parse_time_and_countdown(ts, raw_cd=None):
             return cd_text, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec, diff_seconds
     except:
         pass
-    
-    if raw_cd and isinstance(raw_cd, str) and "T" in raw_cd:
-        is_passed = "T+" in raw_cd
-        clean = raw_cd.replace("T-", "").replace("T+", "").strip()
-        if is_passed:
-            return f"Já nasceu há {clean}", "Horário sob consulta", -999, True, 0, -9999
-        else:
-            return f"Nasce em {clean}", "Horário sob consulta", 999, False, 0, 9999
 
     return "Nasce em N/A", "Horário sob consulta", 999999, False, 0, 99999
 
@@ -128,7 +117,7 @@ def safe_discord_post(payload):
     print(f"Discord Response Status: {resp.status_code}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura silenciosa iniciada...")
+    print(f"[{datetime.now()}] Varredura silenciosa iniciada (dual alert 10m/5m)...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -198,65 +187,4 @@ def main():
         cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm, raw_cd)
         
         if name_str not in unique_bosses:
-            unique_bosses[name_str] = {
-                "name": name_str,
-                "category": "FIELD RAIDS",
-                "cd": cd_text,
-                "tm": tm_formatted,
-                "mins": total_mins,
-                "passed": is_passed,
-                "timestamp": timestamp_sec,
-                "diff_secs": diff_seconds
-            }
-
-    bosses_clean = list(unique_bosses.values())
-    fixed_clean = get_fixed_bosses_list()
-    bosses_clean.extend(fixed_clean)
-
-    if not bosses_clean:
-        print("Nenhum boss monitorado neste ciclo.")
-        return
-
-    # Verificação estricta de alerta de 5 minutos (0 a 300 segundos)
-    state = load_state()
-    state_updated = False
-    alerts_sent_count = 0
-
-    for r in bosses_clean:
-        name = r["name"]
-        diff_secs = r["diff_secs"]
-        tm_formatted = r["tm"]
-        passed = r["passed"]
-
-        # Dispara APENAS se faltar entre 0 e 5 minutos e o boss ainda não tiver nascido/sido alertado
-        if 0 <= diff_secs <= 300 and not passed:
-            alert_key = f"alert_5min_{tm_formatted}"
-            if state.get(name) == alert_key:
-                continue
-            
-            embed_urgent = {
-                "title": "🚨 AOG | ALERTA DE JANELA DE BOSS",
-                "description": f"O boss vai nascer em breve!\n\n🎯 **Boss:** `{name.upper()}`\n⏳ **Previsão exata:** `{tm_formatted}`",
-                "color": 15158332,
-                "footer": {"text": "AOG • RAID ALERT SYSTEM | Horário de Brasília"}
-            }
-            payload_urgent = {
-                "content": f"{ROLE_TAG} **Atenção clã! O boss {name} nasce exatamente às {tm_formatted} (Faltam 5 minutos)!**",
-                "allowed_mentions": {"parse": ["roles"]},
-                "embeds": [embed_urgent]
-            }
-            
-            print(f"🚨 Disparando alerta de 5 min para {name} às {tm_formatted}")
-            safe_discord_post(payload_urgent)
-            
-            state[name] = alert_key
-            state_updated = True
-            alerts_sent_count += 1
-
-    if state_updated:
-        save_state(state)
-
-    print(f"Varredura concluída em silêncio. Alertas disparados neste ciclo: {alerts_sent_count}")
-
-if __name__ == "__main__":
-    main()
+            unique
