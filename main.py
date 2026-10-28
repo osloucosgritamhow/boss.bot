@@ -256,7 +256,7 @@ def main():
     if state_updated:
         save_state(state)
 
-    # Montagem do Painel Tático Consolidado
+    # Montagem do Painel Tático Consolidado (Sem SUPPRESS_EMBEDS)
     fields = []
     for r in bosses_clean[:6]:
         icon = "🔴" if r["passed"] else "🟢"
@@ -277,8 +277,7 @@ def main():
     payload_dashboard = {
         "content": f"{ROLE_TAG} **Painel de Raids Atualizado:**",
         "allowed_mentions": {"parse": ["roles"]},
-        "embeds": [embed_dashboard],
-        "flags": 4
+        "embeds": [embed_dashboard]
     }
 
     print("Enviando painel tático consolidado...")
