@@ -116,7 +116,6 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
                 name = obj.get("name", obj.get("title"))
                 srv = str(obj.get("server", obj.get("server_id", "15")))
                 
-                # Se for Chronos, pega estritamente o server "15". Se for Naia, pega qualquer coisa que NÃO seja "15".
                 matches_server = (srv == "15") if is_chronos else (srv != "15")
                 
                 if name and matches_server and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
@@ -139,7 +138,6 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
         if any(bad in name_str.lower() for bad in ["t.me", "telegram", "http", "profit"]):
             continue
         
-        # Ignora bosses fixos na varredura padrão de campo para injetar com precisão
         if any(f["name"].lower() in name_str.lower() for f in FIXED_BOSSES):
             continue
         
@@ -169,7 +167,6 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
 
     bosses_clean = list(unique_bosses.values())
     
-    # Injeta os bosses fixos em AMBOS os servidores (Chronos e Naia)
     fixed_clean = get_fixed_bosses_list()
     existing_names = {b["name"].lower() for b in bosses_clean}
     for fc in fixed_clean:
@@ -200,13 +197,13 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
             sent_this_run.add(alert_id)
 
             embed_10m = {
-                "title": f"⏳ [{server_label}] BOSS: {name.upper()} - 10 MINUTOS",
+                "title": f"⏳ BOSS: {name.upper()} - 10 MINUTOS",
                 "description": f"**Horário de Spawn:** `{tm_formatted}`",
                 "color": 16763904,
-                "footer": {"text": f"AOG • {server_label} RAID ALERT"}
+                "footer": {"text": "AOG • RAID ALERT SYSTEM"}
             }
             payload_10m = {
-                "content": f"{role_tag} **[{server_label}]** **{name}** ({tm_formatted}) nasce em 10 minutos.",
+                "content": f"{role_tag} **{name}** ({tm_formatted}) nasce em 10 minutos.",
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_10m]
             }
@@ -222,13 +219,13 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
             sent_this_run.add(alert_id)
 
             embed_5m = {
-                "title": f"🚨 [{server_label}] BOSS: {name.upper()} - 5 MINUTOS",
+                "title": f"🚨 BOSS: {name.upper()} - 5 MINUTOS",
                 "description": f"**Horário de Spawn:** `{tm_formatted}`",
                 "color": 15158332,
-                "footer": {"text": f"AOG • {server_label} RAID ALERT"}
+                "footer": {"text": "AOG • RAID ALERT SYSTEM"}
             }
             payload_5m = {
-                "content": f"{role_tag} **[{server_label}]** **{name}** ({tm_formatted}) nasce em 5 minutos.",
+                "content": f"{role_tag} **{name}** ({tm_formatted}) nasce em 5 minutos.",
                 "allowed_mentions": {"parse": ["roles"]},
                 "embeds": [embed_5m]
             }
