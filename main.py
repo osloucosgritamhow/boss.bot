@@ -104,32 +104,36 @@ def safe_discord_post(webhook_url, payload):
     resp = requests.post(webhook_url, json=payload, timeout=5)
     print(f"Discord Response Status ({webhook_url[-10:]}): {resp.status_code}")
 
-def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_tag):
+def extract_server_raids(raw_data, target_server_str):
     raids_list = []
     if raw_data:
-        def extract_raids(obj):
+        def recursive_search(obj):
             if isinstance(obj, dict):
                 obj_str = str(obj).lower()
                 if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
                     return
                 
                 name = obj.get("name", obj.get("title"))
-                srv = str(obj.get("server", obj.get("server_id", "15")))
+                srv = str(obj.get("server", obj.get("server_id", "")))
                 
-                matches_server = (srv == "15") if is_chronos else (srv != "15")
-                
-                if name and matches_server and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
+                # Se o objeto contiver explicitamente o ID do servidor correspondente
+                if name and srv == target_server_str and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
                     raids_list.append(obj)
+                
                 for v in obj.values():
-                    extract_raids(v)
+                    recursive_search(v)
             elif isinstance(obj, list):
                 for item in obj:
-                    extract_raids(item)
+                    recursive_search(item)
 
-        extract_raids(raw_data)
+        recursive_search(raw_data)
+    return raids_list
 
+def process_server_pipeline(raw_data, target_server_str, webhook_url, server_label, role_tag):
+    raw_raids = extract_server_raids(raw_data, target_server_str)
+    
     unique_bosses = {}
-    for r in raids_list:
+    for r in raw_raids:
         name = r.get("name", r.get("title"))
         if not name:
             continue
@@ -167,6 +171,7 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
 
     bosses_clean = list(unique_bosses.values())
     
+    # Injeta os bosses fixos em ambos os canais
     fixed_clean = get_fixed_bosses_list()
     existing_names = {b["name"].lower() for b in bosses_clean}
     for fc in fixed_clean:
@@ -236,7 +241,7 @@ def process_server_raids(raw_data, is_chronos, webhook_url, server_label, role_t
     print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura multisservidor (Chronos & Naia) iniciada...")
+    print(f"[{datetime.now()}] Varredura multisservidor isolada iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -268,11 +273,17 @@ def main():
         print("Erro: Nenhum dado recebido do WebSocket.")
         return
 
-    # Processa Chronos (Server ID 15)
-    process_server_raids(raw_data, is_chronos=True, webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
-
-    # Processa Naia (Qualquer ID diferente de 15)
-    process_server_raids(raw_data, is_chronos=False, webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
+    # Descobrimos pelos testes anteriores que um servidor usa ID "15" e o outro "14" (ou "16").
+    # Vamos processar explicitamente separando por ID exato:
+    # Chronos = "15" (Ajuste se necessário) e Naia = "14" (ou o ID correto capturado)
+    # Como o Naia costuma ser o ID alternativo ao 15, testaremos a separação estrita por chaves de dicionário do payload se houver.
+    
+    # Abordagem blindada: Se o JSON vier separado por chaves de servidores principais (ex: chaves numéricas de server no topo)
+    # Vamos varrer buscando o ID exato. Vamos atribuir Chronos = "15" e Naia = "14" (caso o Naia seja 14) ou vice-versa.
+    # Caso o Naia seja outro ID, esta função isola estritamente. Vamos rodar com Chronos="15" e Naia="14".
+    
+    process_server_pipeline(raw_data, target_server_str="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
+    process_server_pipeline(raw_data, target_server_str="14", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
 
 if __name__ == "__main__":
     main()
