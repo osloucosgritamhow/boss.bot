@@ -183,7 +183,7 @@ def process_server_pipeline(raw_data, target_server_str, webhook_url, server_lab
     print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura multisservidor dinâmica iniciada...")
+    print(f"[{datetime.now()}] Varredura multisservidor DT iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -215,9 +215,9 @@ def main():
         print("Erro: Nenhum dado recebido do WebSocket.")
         return
 
-    # Processa Chronos (Server ID 15) e Naia (Server ID 14) puramente via WebSocket dinâmico
+    # Chronos = ID 15 | Naia = ID 16 (conforme especificado para o interserver DT)
     process_server_pipeline(raw_data, target_server_str="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
-    process_server_pipeline(raw_data, target_server_str="14", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
+    process_server_pipeline(raw_data, target_server_str="16", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
 
 if __name__ == "__main__":
     main()
