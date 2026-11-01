@@ -2,7 +2,7 @@ import json
 import socket
 import sys
 import os
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import requests
 from websocket import create_connection
@@ -18,14 +18,7 @@ WEBHOOK_NAIA = "https://discord.com/api/webhooks/1566106234887864523/9PnraEGcR2o
 ROLE_TAG_CHRONOS = "<@&1285763435107319829>"
 ROLE_TAG_NAIA = "<@&1328384446109323380>"
 
-FIXED_BOSSES = [
-    {"name": "Stakato Queen", "category": "SWAMP RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
-    {"name": "Mega Chaos Golem", "category": "PLUNDEROUS RAIDS", "times": [dtime(10, 0), dtime(13, 0), dtime(17, 0)]},
-    {"name": "Chaos Golem 17", "category": "GOLEM RAIDS", "times": [dtime(11, 0)]},
-    {"name": "Chaos Golem 18", "category": "GOLEM RAIDS", "times": [dtime(15, 0)]},
-]
-
-def parse_time_and_countdown(ts, raw_cd=None):
+def parse_time_and_countdown(ts):
     tz = ZoneInfo("America/Sao_Paulo")
     try:
         if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
@@ -61,41 +54,6 @@ def parse_time_and_countdown(ts, raw_cd=None):
 
     return "Nasce em N/A", "Horário sob consulta", 999999, False, 0, 99999
 
-def get_fixed_bosses_list():
-    tz = ZoneInfo("America/Sao_Paulo")
-    now = datetime.now(tz)
-    fixed_list = []
-
-    for item in FIXED_BOSSES:
-        name = item["name"]
-        category = item["category"]
-        for t in item["times"]:
-            target_dt = datetime.combine(now.date(), t, tzinfo=tz)
-            if target_dt < now:
-                target_dt += timedelta(days=1)
-            
-            diff_seconds = int((target_dt - now).total_seconds())
-            hours = diff_seconds // 3600
-            minutes = (diff_seconds % 3600) // 60
-            seconds = diff_seconds % 60
-            
-            cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            cd_text = f"Nasce em {cd_time}"
-            total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
-            
-            fixed_list.append({
-                "name": name,
-                "category": category,
-                "cd": cd_text,
-                "tm": target_dt.strftime("%d/%m/%Y %H:%M"),
-                "mins": total_mins,
-                "passed": False,
-                "timestamp": target_dt.timestamp(),
-                "diff_secs": diff_seconds
-            })
-            
-    return fixed_list
-
 def safe_discord_post(webhook_url, payload):
     payload_str = str(payload).lower()
     if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
@@ -116,7 +74,6 @@ def extract_server_raids(raw_data, target_server_str):
                 name = obj.get("name", obj.get("title"))
                 srv = str(obj.get("server", obj.get("server_id", "")))
                 
-                # Se o objeto contiver explicitamente o ID do servidor correspondente
                 if name and srv == target_server_str and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
                     raids_list.append(obj)
                 
@@ -142,13 +99,9 @@ def process_server_pipeline(raw_data, target_server_str, webhook_url, server_lab
         if any(bad in name_str.lower() for bad in ["t.me", "telegram", "http", "profit"]):
             continue
         
-        if any(f["name"].lower() in name_str.lower() for f in FIXED_BOSSES):
-            continue
-        
-        raw_cd = r.get("_countdown", r.get("countdown"))
         raw_tm = r.get("_time", r.get("time", r.get("respawn_time")))
         
-        cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm, raw_cd)
+        cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm)
         
         if is_passed:
             continue
@@ -170,17 +123,6 @@ def process_server_pipeline(raw_data, target_server_str, webhook_url, server_lab
             }
 
     bosses_clean = list(unique_bosses.values())
-    
-    # Injeta os bosses fixos em ambos os canais
-    fixed_clean = get_fixed_bosses_list()
-    existing_names = {b["name"].lower() for b in bosses_clean}
-    for fc in fixed_clean:
-        if fc["name"].lower() not in existing_names and not fc["passed"]:
-            bosses_clean.append({
-                "name": fc["name"],
-                "tm": fc["tm"],
-                "diff_secs": fc["diff_secs"]
-            })
 
     if not bosses_clean:
         print(f"[{server_label}] Nenhum boss para monitorar neste ciclo.")
@@ -241,7 +183,7 @@ def process_server_pipeline(raw_data, target_server_str, webhook_url, server_lab
     print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura multisservidor isolada iniciada...")
+    print(f"[{datetime.now()}] Varredura multisservidor dinâmica iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -273,15 +215,7 @@ def main():
         print("Erro: Nenhum dado recebido do WebSocket.")
         return
 
-    # Descobrimos pelos testes anteriores que um servidor usa ID "15" e o outro "14" (ou "16").
-    # Vamos processar explicitamente separando por ID exato:
-    # Chronos = "15" (Ajuste se necessário) e Naia = "14" (ou o ID correto capturado)
-    # Como o Naia costuma ser o ID alternativo ao 15, testaremos a separação estrita por chaves de dicionário do payload se houver.
-    
-    # Abordagem blindada: Se o JSON vier separado por chaves de servidores principais (ex: chaves numéricas de server no topo)
-    # Vamos varrer buscando o ID exato. Vamos atribuir Chronos = "15" e Naia = "14" (caso o Naia seja 14) ou vice-versa.
-    # Caso o Naia seja outro ID, esta função isola estritamente. Vamos rodar com Chronos="15" e Naia="14".
-    
+    # Processa Chronos (Server ID 15) e Naia (Server ID 14) puramente via WebSocket dinâmico
     process_server_pipeline(raw_data, target_server_str="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
     process_server_pipeline(raw_data, target_server_str="14", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
 
