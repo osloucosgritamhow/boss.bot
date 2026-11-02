@@ -53,8 +53,9 @@ def fetch_snapshot():
         ws.close()
 
 
-def spawn_time(raid, now):
+def spawn_time(raid, now, grace_seconds=0):
     """Fixed rules use UTC, as in the website; variable raids use epoch time."""
+    earliest = now - timedelta(seconds=grace_seconds)
     if raid.get('fixedDuration', 0) > 0:
         if raid.get('fixedList'):
             candidates = []
@@ -65,13 +66,13 @@ def spawn_time(raid, now):
                     raise ValueError('Agenda semanal inválida')
                 days = ((day - 1) % 7 - now.weekday()) % 7
                 target = (now + timedelta(days=days)).replace(hour=hour, minute=0, second=0, microsecond=0)
-                if target < now:
+                if target < earliest:
                     target += timedelta(days=7)
                 candidates.append(target)
             return min(candidates)
         hour = int(raid['hour'])
         target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        return target + timedelta(days=1) if target < now else target
+        return target + timedelta(days=1) if target < earliest else target
     value = float(raid['time'])
     if not math.isfinite(value) or value <= 0:
         raise ValueError('Timestamp inválido')
@@ -86,18 +87,20 @@ def upcoming(snapshot, server, now):
             name = raid['name']
             if not isinstance(name, str) or not name.strip():
                 raise ValueError('Nome inválido')
-            target = spawn_time(raid, now)
+            target = spawn_time(raid, now, grace_seconds=120)
         except (KeyError, TypeError, ValueError, OverflowError, OSError) as exc:
             LOG.warning('[%s] Registro ignorado: %s', server, exc)
             continue
         identity = (name, target.timestamp())
-        if target >= now and identity not in seen:
+        if target > now - timedelta(seconds=120) and identity not in seen:
             seen.add(identity)
             yield name, target
 
 
 def alert_minutes(seconds, window=120):
     # Half-open windows: a job every 120 seconds has no 20-second gap.
+    if -window < seconds <= 0:
+        return 0
     for minutes in (10, 5):
         if minutes * 60 - window < seconds <= minutes * 60:
             return minutes
@@ -107,6 +110,17 @@ def alert_minutes(seconds, window=120):
 def payload_for(server, name, target, minutes, role):
     stamp = int(target.timestamp())
     name = name.replace('@', '@\u200b')[:200]
+    if minutes == 0:
+        return {
+            'content': f'<@&{role}>',
+            'allowed_mentions': {'parse': [], 'roles': [role]},
+            'embeds': [{
+                'title': f'⏳ BOSS: {name.upper()} ACABOU DE NASCER!',
+                'description': f'**Horário de Spawn:** `{target.astimezone(DISPLAY_TZ):%d/%m/%Y %H:%M}`',
+                'color': 15158332,
+                'footer': {'text': 'AOG • RAID ALERT SYSTEM'},
+            }],
+        }
     return {
         'content': f'<@&{role}> **{name}** — **{server.upper()}** nasce <t:{stamp}:R>.',
         'allowed_mentions': {'parse': [], 'roles': [role]},
@@ -186,7 +200,7 @@ def run(snapshot, now, dry_run=False):
     failed = False
     for server in SERVERS:
         raids = list(upcoming(snapshot, server, now))
-        LOG.info('[%s] %d bosses futuros', server, len(raids))
+        LOG.info('[%s] %d bosses para monitorar', server, len(raids))
         for name, target in raids:
             seconds = (target - now).total_seconds()
             minutes = alert_minutes(seconds)
