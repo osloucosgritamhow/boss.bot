@@ -62,45 +62,57 @@ def safe_discord_post(webhook_url, payload):
     resp = requests.post(webhook_url, json=payload, timeout=5)
     print(f"Discord Response Status ({webhook_url[-10:]}): {resp.status_code}")
 
-def extract_server_raids(raw_data, target_server_str):
+def extract_server_raids(raw_data, target_id):
     raids_list = []
-    if not raw_data:
+    if not raw_data or not isinstance(raw_data, dict):
         return raids_list
 
-    # Tenta isolar o ramo específico do servidor no JSON (ex: raw_data["15"] ou raw_data["servers"]["15"])
-    server_data = raw_data
-    if isinstance(raw_data, dict):
-        if target_server_str in raw_data:
-            server_data = raw_data[target_server_str]
-        elif "servers" in raw_data and isinstance(raw_data["servers"], dict) and target_server_str in raw_data["servers"]:
-            server_data = raw_data["servers"][target_server_str]
+    # Localiza o bloco exato do ID do servidor na raiz ou em sub-dicionários (ex: "15" ou "16")
+    target_bucket = None
+    target_str = str(target_id)
+    
+    if target_str in raw_data:
+        target_bucket = raw_data[target_str]
+    elif "servers" in raw_data and isinstance(raw_data["servers"], dict) and target_str in raw_data["servers"]:
+        target_bucket = raw_data["servers"][target_str]
+    else:
+        # Fallback de varredura estrita verificando se o objeto possui a chave de servidor id correspondente
+        def deep_search(node):
+            if isinstance(node, dict):
+                srv = str(node.get("server", node.get("server_id", "")))
+                name = node.get("name", node.get("title"))
+                if name and srv == target_str and ("_time" in node or "time" in node or "_countdown" in node or "countdown" in node):
+                    raids_list.append(node)
+                for v in node.values():
+                    deep_search(v)
+            elif isinstance(node, list):
+                for item in node:
+                    deep_search(item)
+        deep_search(raw_data)
+        return raids_list
 
-    def recursive_search(obj):
-        if isinstance(obj, dict):
-            obj_str = str(obj).lower()
+    # Se achou o bloco direto do servidor, varre apenas os itens de dentro desse bloco
+    def collect_items(node):
+        if isinstance(node, dict):
+            name = node.get("name", node.get("title"))
+            obj_str = str(node).lower()
             if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
                 return
-            
-            name = obj.get("name", obj.get("title"))
-            srv = str(obj.get("server", obj.get("server_id", "")))
-            
-            # Se o objeto tiver o nome e possuir indicador de tempo/countdown
-            if name and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
-                # Se o servidor bater ou se estivermos navegando dentro da chave isolada do servidor
-                if srv == "" or srv == target_server_str:
-                    raids_list.append(obj)
-            
-            for v in obj.values():
-                recursive_search(v)
-        elif isinstance(obj, list):
-            for item in obj:
-                recursive_search(item)
+            if name and ("_time" in node or "time" in node or "_countdown" in node or "countdown" in node):
+                raids_list.append(node)
+            for v in node.values():
+                collect_items(v)
+        elif isinstance(node, list):
+            for item in node:
+                collect_items(item)
 
-    recursive_search(server_data)
+    if target_bucket:
+        collect_items(target_bucket)
+
     return raids_list
 
-def process_server_pipeline(raw_data, target_server_str, webhook_url, server_label, role_tag):
-    raw_raids = extract_server_raids(raw_data, target_server_str)
+def process_server_pipeline(raw_data, target_id, webhook_url, server_label, role_tag):
+    raw_raids = extract_server_raids(raw_data, target_id)
     
     unique_bosses = {}
     for r in raw_raids:
@@ -196,7 +208,7 @@ def process_server_pipeline(raw_data, target_server_str, webhook_url, server_lab
     print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura multisservidor isolada iniciada...")
+    print(f"[{datetime.now()}] Varredura multisservidor isolada (Chronos=15, Naia=16) iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -228,9 +240,9 @@ def main():
         print("Erro: Nenhum dado recebido do WebSocket.")
         return
 
-    # Chronos = ID "15" | Naia = ID "16"
-    process_server_pipeline(raw_data, target_server_str="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
-    process_server_pipeline(raw_data, target_server_str="16", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
+    # Processamento estrito e isolado por ID de servidor
+    process_server_pipeline(raw_data, target_id="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
+    process_server_pipeline(raw_data, target_id="16", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
 
 if __name__ == "__main__":
     main()
