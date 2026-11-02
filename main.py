@@ -62,57 +62,66 @@ def safe_discord_post(webhook_url, payload):
     resp = requests.post(webhook_url, json=payload, timeout=5)
     print(f"Discord Response Status ({webhook_url[-10:]}): {resp.status_code}")
 
-def extract_server_raids(raw_data, target_id):
+def extract_specific_server_raids(raw_data, target_id_str):
     raids_list = []
-    if not raw_data or not isinstance(raw_data, dict):
+    if not raw_data:
         return raids_list
 
-    # Localiza o bloco exato do ID do servidor na raiz ou em sub-dicionários (ex: "15" ou "16")
-    target_bucket = None
-    target_str = str(target_id)
+    # Abordagem cirúrgica: verifica se o payload possui dicionários separados por ID de servidor na raiz
+    # Ex: raw_data["15"] ou raw_data["data"]["15"] ou varredura de nós que contêm a chave exata do ID
+    search_nodes = []
     
-    if target_str in raw_data:
-        target_bucket = raw_data[target_str]
-    elif "servers" in raw_data and isinstance(raw_data["servers"], dict) and target_str in raw_data["servers"]:
-        target_bucket = raw_data["servers"][target_str]
-    else:
-        # Fallback de varredura estrita verificando se o objeto possui a chave de servidor id correspondente
-        def deep_search(node):
-            if isinstance(node, dict):
-                srv = str(node.get("server", node.get("server_id", "")))
-                name = node.get("name", node.get("title"))
-                if name and srv == target_str and ("_time" in node or "time" in node or "_countdown" in node or "countdown" in node):
-                    raids_list.append(node)
-                for v in node.values():
-                    deep_search(v)
-            elif isinstance(node, list):
-                for item in node:
-                    deep_search(item)
-        deep_search(raw_data)
-        return raids_list
+    if isinstance(raw_data, dict):
+        if target_id_str in raw_data:
+            search_nodes.append(raw_data[target_id_str])
+        if "servers" in raw_data and isinstance(raw_data["servers"], dict) and target_id_str in raw_data["servers"]:
+            search_nodes.append(raw_data["servers"][target_id_str])
+            
+        # Se não achou chave direta, vasculha procurando nós cujo dicionário pai ou chave seja o ID do servidor
+        if not search_nodes:
+            def find_buckets(node):
+                if isinstance(node, dict):
+                    for k, v in node.items():
+                        if str(k) == target_id_str:
+                            search_nodes.append(v)
+                        else:
+                            find_buckets(v)
+                elif isinstance(node, list):
+                    for item in node:
+                        find_buckets(item)
+            find_buckets(raw_data)
 
-    # Se achou o bloco direto do servidor, varre apenas os itens de dentro desse bloco
-    def collect_items(node):
+    # Se ainda assim não achou um balde específico, fazemos um filtro estrito checando propriedades de ID dentro do objeto
+    if not search_nodes:
+        search_nodes.append(raw_data)
+
+    def collect_valid_raids(node):
         if isinstance(node, dict):
             name = node.get("name", node.get("title"))
+            srv = str(node.get("server", node.get("server_id", "")))
             obj_str = str(node).lower()
+            
             if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
                 return
+                
+            # Se o item tem nome e tempo, e o ID do server confere (ou se estamos num bucket isolado)
             if name and ("_time" in node or "time" in node or "_countdown" in node or "countdown" in node):
-                raids_list.append(node)
+                if srv == "" or srv == target_id_str:
+                    raids_list.append(node)
+            
             for v in node.values():
-                collect_items(v)
+                collect_valid_raids(v)
         elif isinstance(node, list):
             for item in node:
-                collect_items(item)
+                collect_valid_raids(item)
 
-    if target_bucket:
-        collect_items(target_bucket)
+    for bucket in search_nodes:
+        collect_valid_raids(bucket)
 
     return raids_list
 
 def process_server_pipeline(raw_data, target_id, webhook_url, server_label, role_tag):
-    raw_raids = extract_server_raids(raw_data, target_id)
+    raw_raids = extract_specific_server_raids(raw_data, target_id)
     
     unique_bosses = {}
     for r in raw_raids:
@@ -208,7 +217,7 @@ def process_server_pipeline(raw_data, target_id, webhook_url, server_label, role
     print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura multisservidor isolada (Chronos=15, Naia=16) iniciada...")
+    print(f"[{datetime.now()}] Varredura multisservidor isolada iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -240,7 +249,7 @@ def main():
         print("Erro: Nenhum dado recebido do WebSocket.")
         return
 
-    # Processamento estrito e isolado por ID de servidor
+    # Chronos = ID "15" | Naia = ID "16" processados separadamente com baldes isolados
     process_server_pipeline(raw_data, target_id="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
     process_server_pipeline(raw_data, target_id="16", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
 
