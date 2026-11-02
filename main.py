@@ -108,7 +108,7 @@ def alert_minutes(seconds, window=120):
 
 
 def payload_for(server, name, target, minutes, role):
-    stamp = int(target.timestamp())
+    formatted_time = target.astimezone(DISPLAY_TZ).strftime("%d/%m/%Y %H:%M")
     name = name.replace('@', '@\u200b')[:200]
     if minutes == 0:
         return {
@@ -122,13 +122,13 @@ def payload_for(server, name, target, minutes, role):
             }],
         }
     return {
-        'content': f'<@&{role}> **{name}** — **{server.upper()}** nasce <t:{stamp}:R>.',
+        'content': f'<@&{role}> **{name}** ({formatted_time}) nasce em {minutes} minutos.',
         'allowed_mentions': {'parse': [], 'roles': [role]},
         'embeds': [{
-            'title': f'⏳ {server.upper()} • Alerta de {minutes} minutos',
-            'description': f'**{name}**\nHorário: <t:{stamp}:F>\nBrasil: {target.astimezone(DISPLAY_TZ):%d/%m/%Y %H:%M}',
+            'title': f'⏳ BOSS: {name.upper()} - {minutes} MINUTOS',
+            'description': f'**Horário de Spawn:** `{formatted_time}`',
             'color': 16763904 if minutes == 10 else 15158332,
-            'footer': {'text': 'AoG • Fonte: l2stuff.xyz'},
+            'footer': {'text': 'AOG • RAID ALERT SYSTEM'},
         }],
     }
 
