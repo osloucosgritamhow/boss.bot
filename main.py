@@ -64,26 +64,39 @@ def safe_discord_post(webhook_url, payload):
 
 def extract_server_raids(raw_data, target_server_str):
     raids_list = []
-    if raw_data:
-        def recursive_search(obj):
-            if isinstance(obj, dict):
-                obj_str = str(obj).lower()
-                if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
-                    return
-                
-                name = obj.get("name", obj.get("title"))
-                srv = str(obj.get("server", obj.get("server_id", "")))
-                
-                if name and srv == target_server_str and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
-                    raids_list.append(obj)
-                
-                for v in obj.values():
-                    recursive_search(v)
-            elif isinstance(obj, list):
-                for item in obj:
-                    recursive_search(item)
+    if not raw_data:
+        return raids_list
 
-        recursive_search(raw_data)
+    # Tenta isolar o ramo específico do servidor no JSON (ex: raw_data["15"] ou raw_data["servers"]["15"])
+    server_data = raw_data
+    if isinstance(raw_data, dict):
+        if target_server_str in raw_data:
+            server_data = raw_data[target_server_str]
+        elif "servers" in raw_data and isinstance(raw_data["servers"], dict) and target_server_str in raw_data["servers"]:
+            server_data = raw_data["servers"][target_server_str]
+
+    def recursive_search(obj):
+        if isinstance(obj, dict):
+            obj_str = str(obj).lower()
+            if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
+                return
+            
+            name = obj.get("name", obj.get("title"))
+            srv = str(obj.get("server", obj.get("server_id", "")))
+            
+            # Se o objeto tiver o nome e possuir indicador de tempo/countdown
+            if name and ("_time" in obj or "time" in obj or "_countdown" in obj or "countdown" in obj):
+                # Se o servidor bater ou se estivermos navegando dentro da chave isolada do servidor
+                if srv == "" or srv == target_server_str:
+                    raids_list.append(obj)
+            
+            for v in obj.values():
+                recursive_search(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                recursive_search(item)
+
+    recursive_search(server_data)
     return raids_list
 
 def process_server_pipeline(raw_data, target_server_str, webhook_url, server_label, role_tag):
@@ -183,7 +196,7 @@ def process_server_pipeline(raw_data, target_server_str, webhook_url, server_lab
     print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
 
 def main():
-    print(f"[{datetime.now()}] Varredura multisservidor DT iniciada...")
+    print(f"[{datetime.now()}] Varredura multisservidor isolada iniciada...")
     ws_url = "wss://ws.raids.l2stuff.xyz/"
     ws_headers = {
         "Origin": "https://l2stuff.xyz",
@@ -215,7 +228,7 @@ def main():
         print("Erro: Nenhum dado recebido do WebSocket.")
         return
 
-    # Chronos = ID 15 | Naia = ID 16 (conforme especificado para o interserver DT)
+    # Chronos = ID "15" | Naia = ID "16"
     process_server_pipeline(raw_data, target_server_str="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
     process_server_pipeline(raw_data, target_server_str="16", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
 
