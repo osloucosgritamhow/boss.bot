@@ -1,257 +1,229 @@
+"""Raid alerts for Render cron. Use --dry-run to inspect without posting."""
+import argparse
+import hashlib
 import json
-import socket
-import sys
+import logging
+import math
 import os
-from datetime import datetime
+from pathlib import Path
+import time
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
 import requests
 from websocket import create_connection
 
-socket.setdefaulttimeout(4)
-sys.stdout.reconfigure(line_buffering=True)
+UTC = timezone.utc
+DISPLAY_TZ = ZoneInfo('America/Sao_Paulo')
+SERVERS = {
+    'chronos': ('WEBHOOK_CHRONOS', 'ROLE_ID_CHRONOS', '1285763435107319829'),
+    'naia': ('WEBHOOK_NAIA', 'ROLE_ID_NAIA', '1328384446109323380'),
+}
+LOG = logging.getLogger('raids')
 
-# Webhooks separados para cada canal
-WEBHOOK_CHRONOS = "https://discord.com/api/webhooks/1564794001704615966/95X7TnqSNCxFv_2hPEehIQV4BV_WxoZKvCKVMlusjf9NnJu1oKQGtmrr4t7hNaCOfd5a"
-WEBHOOK_NAIA = "https://discord.com/api/webhooks/1566106234887864523/9PnraEGcR2ovTey6pQgt5Gp0qoz2ho3glz2el5Itr-F5tM3oVJNSz3qhcb7BCaWaDUxk"
 
-# Cargos específicos por servidor
-ROLE_TAG_CHRONOS = "<@&1285763435107319829>"
-ROLE_TAG_NAIA = "<@&1328384446109323380>"
-
-def parse_time_and_countdown(ts):
-    tz = ZoneInfo("America/Sao_Paulo")
+def fetch_snapshot():
+    """Only accept the complete message, not a ping or partial update."""
+    ws = create_connection('wss://ws.raids.l2stuff.xyz/',
+                           origin='https://l2stuff.xyz', timeout=15)
     try:
-        if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.isdigit()):
-            val = int(ts)
-            val_sec = val / 1000 if val > 10000000000 else val
-            
-            target_dt = datetime.fromtimestamp(val_sec, tz=ZoneInfo("UTC")).astimezone(tz)
-            now_dt = datetime.now(tz)
-            
-            diff_seconds = int((target_dt - now_dt).total_seconds())
-            
-            if diff_seconds >= 0:
-                hours = diff_seconds // 3600
-                minutes = (diff_seconds % 3600) // 60
-                seconds = diff_seconds % 60
-                cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                cd_text = f"Nasce em {cd_time}"
-                total_mins = hours * 60 + minutes + (1 if seconds > 0 else 0)
-                is_passed = False
-            else:
-                diff_sec_abs = abs(diff_seconds)
-                hours = diff_sec_abs // 3600
-                minutes = (diff_sec_abs % 3600) // 60
-                seconds = diff_sec_abs % 60
-                cd_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                cd_text = f"Já nasceu há {cd_time}"
-                total_mins = -(hours * 60 + minutes + (1 if seconds > 0 else 0))
-                is_passed = True
-            
-            return cd_text, target_dt.strftime("%d/%m/%Y %H:%M"), total_mins, is_passed, val_sec, diff_seconds
-    except:
-        pass
-
-    return "Nasce em N/A", "Horário sob consulta", 999999, False, 0, 99999
-
-def safe_discord_post(webhook_url, payload):
-    payload_str = str(payload).lower()
-    if "t.me" in payload_str or "telegram" in payload_str or "dm at" in payload_str or "a-tools" in payload_str:
-        print("⚠️ Propaganda detectada e bloqueada!")
-        return
-    resp = requests.post(webhook_url, json=payload, timeout=5)
-    print(f"Discord Response Status ({webhook_url[-10:]}): {resp.status_code}")
-
-def extract_specific_server_raids(raw_data, target_id_str):
-    raids_list = []
-    if not raw_data:
-        return raids_list
-
-    # Abordagem cirúrgica: verifica se o payload possui dicionários separados por ID de servidor na raiz
-    # Ex: raw_data["15"] ou raw_data["data"]["15"] ou varredura de nós que contêm a chave exata do ID
-    search_nodes = []
-    
-    if isinstance(raw_data, dict):
-        if target_id_str in raw_data:
-            search_nodes.append(raw_data[target_id_str])
-        if "servers" in raw_data and isinstance(raw_data["servers"], dict) and target_id_str in raw_data["servers"]:
-            search_nodes.append(raw_data["servers"][target_id_str])
-            
-        # Se não achou chave direta, vasculha procurando nós cujo dicionário pai ou chave seja o ID do servidor
-        if not search_nodes:
-            def find_buckets(node):
-                if isinstance(node, dict):
-                    for k, v in node.items():
-                        if str(k) == target_id_str:
-                            search_nodes.append(v)
-                        else:
-                            find_buckets(v)
-                elif isinstance(node, list):
-                    for item in node:
-                        find_buckets(item)
-            find_buckets(raw_data)
-
-    # Se ainda assim não achou um balde específico, fazemos um filtro estrito checando propriedades de ID dentro do objeto
-    if not search_nodes:
-        search_nodes.append(raw_data)
-
-    def collect_valid_raids(node):
-        if isinstance(node, dict):
-            name = node.get("name", node.get("title"))
-            srv = str(node.get("server", node.get("server_id", "")))
-            obj_str = str(node).lower()
-            
-            if "t.me" in obj_str or "telegram" in obj_str or "dm at" in obj_str:
-                return
-                
-            # Se o item tem nome e tempo, e o ID do server confere (ou se estamos num bucket isolado)
-            if name and ("_time" in node or "time" in node or "_countdown" in node or "countdown" in node):
-                if srv == "" or srv == target_id_str:
-                    raids_list.append(node)
-            
-            for v in node.values():
-                collect_valid_raids(v)
-        elif isinstance(node, list):
-            for item in node:
-                collect_valid_raids(item)
-
-    for bucket in search_nodes:
-        collect_valid_raids(bucket)
-
-    return raids_list
-
-def process_server_pipeline(raw_data, target_id, webhook_url, server_label, role_tag):
-    raw_raids = extract_specific_server_raids(raw_data, target_id)
-    
-    unique_bosses = {}
-    for r in raw_raids:
-        name = r.get("name", r.get("title"))
-        if not name:
-            continue
-        
-        name_str = str(name).strip()
-        if any(bad in name_str.lower() for bad in ["t.me", "telegram", "http", "profit"]):
-            continue
-        
-        raw_tm = r.get("_time", r.get("time", r.get("respawn_time")))
-        
-        cd_text, tm_formatted, total_mins, is_passed, timestamp_sec, diff_seconds = parse_time_and_countdown(raw_tm)
-        
-        if is_passed:
-            continue
-
-        boss_key = name_str.lower()
-        if boss_key in unique_bosses:
-            existing_diff = unique_bosses[boss_key]["diff_secs"]
-            if 0 <= diff_seconds < existing_diff:
-                unique_bosses[boss_key] = {
-                    "name": name_str,
-                    "tm": tm_formatted,
-                    "diff_secs": diff_seconds
-                }
-        else:
-            unique_bosses[boss_key] = {
-                "name": name_str,
-                "tm": tm_formatted,
-                "diff_secs": diff_seconds
-            }
-
-    bosses_clean = list(unique_bosses.values())
-
-    if not bosses_clean:
-        print(f"[{server_label}] Nenhum boss para monitorar neste ciclo.")
-        return
-
-    alerts_sent_count = 0
-    sent_this_run = set()
-
-    for r in bosses_clean:
-        name = r["name"]
-        diff_secs = r["diff_secs"]
-        tm_formatted = r["tm"]
-
-        # 1. ALERTA DE 10 MINUTOS (janela estrita entre 500s e 600s)
-        if 500 <= diff_secs <= 600:
-            alert_id = f"10m_{server_label}_{name.lower()}_{tm_formatted}"
-            if alert_id in sent_this_run:
+        deadline = time.monotonic() + 30
+        for _ in range(30):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            ws.settimeout(min(remaining, 15))
+            message = ws.recv()
+            if not message:
+                raise RuntimeError('WebSocket encerrado antes dos dados completos')
+            try:
+                data = json.loads(message)
+            except (ValueError, TypeError):
                 continue
-            sent_this_run.add(alert_id)
+            if isinstance(data, dict) and data.get('m') == 'all':
+                snapshot = data.get('d')
+                if not isinstance(snapshot, dict):
+                    raise ValueError('Snapshot sem objeto d')
+                for server in SERVERS:
+                    if not isinstance(snapshot.get(server), dict) or not isinstance(snapshot[server].get('raids'), list):
+                        raise ValueError(f'Snapshot sem lista raids de {server}')
+                return snapshot
+        raise RuntimeError('Snapshot m=all não recebido')
+    finally:
+        ws.close()
 
-            embed_10m = {
-                "title": f"⏳ BOSS: {name.upper()} - 10 MINUTOS",
-                "description": f"**Horário de Spawn:** `{tm_formatted}`",
-                "color": 16763904,
-                "footer": {"text": "AOG • RAID ALERT SYSTEM"}
-            }
-            payload_10m = {
-                "content": f"{role_tag} **{name}** ({tm_formatted}) nasce em 10 minutos.",
-                "allowed_mentions": {"parse": ["roles"]},
-                "embeds": [embed_10m]
-            }
-            print(f"[{server_label}] Disparando 10m para {name} em {tm_formatted}")
-            safe_discord_post(webhook_url, payload_10m)
-            alerts_sent_count += 1
 
-        # 2. ALERTA DE 5 MINUTOS (janela estrita entre 200s e 300s)
-        elif 200 <= diff_secs <= 300:
-            alert_id = f"5m_{server_label}_{name.lower()}_{tm_formatted}"
-            if alert_id in sent_this_run:
-                continue
-            sent_this_run.add(alert_id)
+def spawn_time(raid, now):
+    """Fixed rules use UTC, as in the website; variable raids use epoch time."""
+    if raid.get('fixedDuration', 0) > 0:
+        if raid.get('fixedList'):
+            candidates = []
+            # JavaScript: Sunday=0. Python: Monday=0.
+            for entry in raid['fixedList']:
+                day, hour = int(entry[0]), int(entry[1])
+                if not 0 <= day <= 6 or not 0 <= hour <= 23:
+                    raise ValueError('Agenda semanal inválida')
+                days = ((day - 1) % 7 - now.weekday()) % 7
+                target = (now + timedelta(days=days)).replace(hour=hour, minute=0, second=0, microsecond=0)
+                if target < now:
+                    target += timedelta(days=7)
+                candidates.append(target)
+            return min(candidates)
+        hour = int(raid['hour'])
+        target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        return target + timedelta(days=1) if target < now else target
+    value = float(raid['time'])
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError('Timestamp inválido')
+    return datetime.fromtimestamp(value / 1000 if value > 10_000_000_000 else value, UTC)
 
-            embed_5m = {
-                "title": f"🚨 BOSS: {name.upper()} - 5 MINUTOS",
-                "description": f"**Horário de Spawn:** `{tm_formatted}`",
-                "color": 15158332,
-                "footer": {"text": "AOG • RAID ALERT SYSTEM"}
-            }
-            payload_5m = {
-                "content": f"{role_tag} **{name}** ({tm_formatted}) nasce em 5 minutos.",
-                "allowed_mentions": {"parse": ["roles"]},
-                "embeds": [embed_5m]
-            }
-            print(f"[{server_label}] Disparando 5m para {name} em {tm_formatted}")
-            safe_discord_post(webhook_url, payload_5m)
-            alerts_sent_count += 1
 
-    print(f"[{server_label}] Varredura concluída. Alertas disparados: {alerts_sent_count}")
+def upcoming(snapshot, server, now):
+    # Never traverse another server or fall back to a global search.
+    seen = set()
+    for raid in snapshot[server]['raids']:
+        try:
+            name = raid['name']
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError('Nome inválido')
+            target = spawn_time(raid, now)
+        except (KeyError, TypeError, ValueError, OverflowError, OSError) as exc:
+            LOG.warning('[%s] Registro ignorado: %s', server, exc)
+            continue
+        identity = (name, target.timestamp())
+        if target >= now and identity not in seen:
+            seen.add(identity)
+            yield name, target
 
-def main():
-    print(f"[{datetime.now()}] Varredura multisservidor isolada iniciada...")
-    ws_url = "wss://ws.raids.l2stuff.xyz/"
-    ws_headers = {
-        "Origin": "https://l2stuff.xyz",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+def alert_minutes(seconds, window=120):
+    # Half-open windows: a job every 120 seconds has no 20-second gap.
+    for minutes in (10, 5):
+        if minutes * 60 - window < seconds <= minutes * 60:
+            return minutes
+    return None
+
+
+def payload_for(server, name, target, minutes, role):
+    stamp = int(target.timestamp())
+    name = name.replace('@', '@\u200b')[:200]
+    return {
+        'content': f'<@&{role}> **{name}** — **{server.upper()}** nasce <t:{stamp}:R>.',
+        'allowed_mentions': {'parse': [], 'roles': [role]},
+        'embeds': [{
+            'title': f'⏳ {server.upper()} • Alerta de {minutes} minutos',
+            'description': f'**{name}**\nHorário: <t:{stamp}:F>\nBrasil: {target.astimezone(DISPLAY_TZ):%d/%m/%Y %H:%M}',
+            'color': 16763904 if minutes == 10 else 15158332,
+            'footer': {'text': 'AoG • Fonte: l2stuff.xyz'},
+        }],
     }
 
-    ws = None
-    raw_data = None
+
+class AlertState:
+    """Optional persistent Redis REST store; JSON fallback for local use."""
+    def __init__(self):
+        self.url = os.getenv('UPSTASH_REDIS_REST_URL', '').rstrip('/')
+        self.token = os.getenv('UPSTASH_REDIS_REST_TOKEN', '')
+        if bool(self.url) != bool(self.token):
+            raise ValueError('Configure ambas as variáveis UPSTASH_REDIS_REST_*')
+        self.path = Path(os.getenv('ALERT_STATE_FILE', 'sent_alerts.json'))
+        self.data = {}
+        if not self.url:
+            LOG.warning('Estado em arquivo local: no Render Cron ele não persiste entre execuções. Use Redis REST para deduplicação durável.')
+            if self.path.exists():
+                self.data = json.loads(self.path.read_text())
+            cutoff = time.time() - 8 * 86400
+            self.data = {k: v for k, v in self.data.items() if isinstance(v, (int, float)) and v > cutoff}
+
+    def command(self, *args):
+        response = requests.post(self.url, headers={'Authorization': f'Bearer {self.token}'}, json=list(args), timeout=10)
+        if not response.ok:
+            raise RuntimeError(f'Falha no estado Redis: HTTP {response.status_code}')
+        result = response.json()
+        if 'error' in result:
+            raise RuntimeError('Redis rejeitou comando de estado')
+        return result['result']
+
+    def contains(self, key):
+        return bool(self.command('EXISTS', key)) if self.url else key in self.data
+
+    def mark(self, key):
+        if self.url:
+            self.command('SET', key, 'sent', 'EX', 8 * 86400)
+        else:
+            self.data[key] = time.time()
+            temporary = self.path.with_suffix('.tmp')
+            temporary.write_text(json.dumps(self.data))
+            temporary.replace(self.path)
+
+
+def post_discord(url, payload):
+    # Log status only: exception strings can contain the secret webhook URL.
     try:
-        ws = create_connection(ws_url, header=ws_headers, timeout=4)
-        ws.settimeout(4)
-        for i in range(3):
-            msg = ws.recv()
-            if msg:
-                parsed = json.loads(msg)
-                if isinstance(parsed, dict):
-                    raw_data = parsed
-                    break
-    except Exception as e:
-        print(f"Aviso WebSocket: {e}")
-    finally:
-        if ws:
-            try:
-                ws.close()
-            except:
-                pass
+        response = requests.post(url, json=payload, timeout=15)
+        if response.status_code == 429:
+            LOG.error('Discord limitou envios (HTTP 429); alerta não marcado como enviado')
+            return False
+        if not 200 <= response.status_code < 300:
+            LOG.error('Discord rejeitou envio: HTTP %s', response.status_code)
+            return False
+        return True
+    except requests.RequestException as exc:
+        LOG.error('Falha de conexão com Discord: %s', type(exc).__name__)
+        return False
 
-    if not raw_data:
-        print("Erro: Nenhum dado recebido do WebSocket.")
-        return
 
-    # Chronos = ID "15" | Naia = ID "16" processados separadamente com baldes isolados
-    process_server_pipeline(raw_data, target_id="15", webhook_url=WEBHOOK_CHRONOS, server_label="CHRONOS", role_tag=ROLE_TAG_CHRONOS)
-    process_server_pipeline(raw_data, target_id="16", webhook_url=WEBHOOK_NAIA, server_label="NAIA", role_tag=ROLE_TAG_NAIA)
+def run(snapshot, now, dry_run=False):
+    configs = {}
+    if not dry_run:
+        for server, (webhook_env, role_env, default_role) in SERVERS.items():
+            url = os.getenv(webhook_env, '')
+            role = os.getenv(role_env, default_role)
+            if not url.startswith('https://discord.com/api/webhooks/') or not role.isdigit():
+                raise ValueError(f'Configure {webhook_env} e um ID numérico em {role_env}')
+            configs[server] = (url, role)
+    state = None if dry_run else AlertState()
+    failed = False
+    for server in SERVERS:
+        raids = list(upcoming(snapshot, server, now))
+        LOG.info('[%s] %d bosses futuros', server, len(raids))
+        for name, target in raids:
+            seconds = (target - now).total_seconds()
+            minutes = alert_minutes(seconds)
+            if dry_run:
+                LOG.info('[%s] %s | Brasil %s | faltam %.1f min | alerta=%s', server, name,
+                         target.astimezone(DISPLAY_TZ).strftime('%d/%m/%Y %H:%M'), seconds / 60, minutes)
+                continue
+            if minutes is None:
+                continue
+            key = 'raid-alert:' + hashlib.sha256(f'{server}|{name}|{target.timestamp()}|{minutes}'.encode()).hexdigest()
+            if state.contains(key):
+                LOG.info('[%s] Alerta já enviado: %s (%dm)', server, name, minutes)
+                continue
+            url, role = configs[server]
+            if post_discord(url, payload_for(server, name, target, minutes, role)):
+                state.mark(key)
+                LOG.info('[%s] Enviado: %s (%dm)', server, name, minutes)
+            else:
+                failed = True
+    if failed:
+        raise RuntimeError('Um ou mais alertas falharam; consulte os status acima')
 
-if __name__ == "__main__":
-    main()
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dry-run', action='store_true', help='Consulta e calcula sem enviar ao Discord')
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+    try:
+        snapshot = fetch_snapshot()
+        run(snapshot, datetime.now(UTC), dry_run=args.dry_run)
+    except Exception as exc:
+        # Avoid exposing credential-bearing URLs in requests/websocket exceptions.
+        LOG.error('Execução falhou (%s). Verifique conexão, dados e variáveis de ambiente.', type(exc).__name__)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
